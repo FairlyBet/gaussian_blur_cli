@@ -1,177 +1,136 @@
-use crate::buffer::{ReadableImageBuffer, UniformBuffer, WritableImageBuffer};
-use std::{ffi::CString, marker::PhantomData};
+use crate::{
+    blur_shader::BlurProgram,
+    buffer::{ImageBuffer, ReadableImageBuffer, UniformBuffer, WritableImageBuffer},
+};
+use glfw::{fail_on_errors, ClientApiHint, OpenGlProfileHint, WindowHint, WindowMode};
+use image::ExtendedColorType;
 
 #[derive(Debug)]
 pub struct Renderer {}
 
 impl Renderer {
-    pub fn new() -> Option<Self> {
-        let blur_program = BlurProgram::new()?;
-        blur_program.use_();
-        let mut input_buffer = WritableImageBuffer::new(64)?;
-        let output_buffer = ReadableImageBuffer::new(64)?;
+    pub fn new(kernel_size: usize, sigma: f32) -> Option<Self> {
+        let mut glfw = glfw::init(fail_on_errors!()).ok()?;
+        glfw.window_hint(WindowHint::ClientApi(ClientApiHint::OpenGl));
+        glfw.window_hint(WindowHint::OpenGlProfile(OpenGlProfileHint::Core));
+        glfw.window_hint(WindowHint::ContextVersion(4, 5));
+        glfw.window_hint(WindowHint::Visible(false));
+        let (mut w, _) = glfw.create_window(1, 1, "", WindowMode::Windowed)?;
+        gl::load_with(|symbol| w.get_proc_address(symbol));
 
-        #[derive(Debug, Clone, Copy)]
-        #[repr(C)]
-        struct ImageData {
-            offset: i32,
-            width: i32,
-            height: i32,
-        }
+        let t = std::time::Instant::now();
+        let image = image::open("sample.jpg").unwrap();
+        println!("Image open: {}", t.elapsed().as_millis());
+        let bytes = image.as_rgb8().unwrap().as_raw();
 
+        let mut input_buffer = WritableImageBuffer::new(bytes.len())?;
+        let intermadiate_buffer = ImageBuffer::new(bytes.len())?;
+        let output_buffer = ReadableImageBuffer::new(bytes.len())?;
         let mut uniform_buffer = UniformBuffer::<ImageData>::new()?;
         uniform_buffer.update(ImageData {
             offset: 0,
-            width: 4,
-            height: 4,
+            width: image.width() as i32,
+            height: image.height() as i32,
         });
+
+        let kernel = gaussian_kernel(kernel_size, sigma);
+        let kernel = kernel_to_glsl(kernel);
+        let program = BlurProgram::new(&kernel, w.get_context_version())?;
+        program.use_();
+
         unsafe {
-            input_buffer
-                .data()
-                .iter_mut()
-                .enumerate()
-                .for_each(|(i, item)| *item = i as u8);
-            input_buffer.bind_image_texture(0, gl::READ_ONLY);
-            output_buffer.bind_image_texture(1, gl::WRITE_ONLY);
-            uniform_buffer.bind_buffer_base(2);
-            gl::DispatchCompute(1, 1, 1);
+            input_buffer.data().copy_from_slice(bytes);
+            println!("Ready for render: {}", t.elapsed().as_millis());
+            // .iter_mut()
+            // .enumerate()
+            // .for_each(|(i, item)| *item = i as u8);
+            uniform_buffer.bind_buffer_base(BlurProgram::UNIFORM_BINDING_POINT);
+
+            input_buffer.bind_image_texture(BlurProgram::INPUT_BINDING_UNIT, gl::READ_ONLY);
+            intermadiate_buffer.bind_image_texture(BlurProgram::OUPUT_BINDING_UNIT, gl::WRITE_ONLY);
+            program.set_horizontal();
+            gl::DispatchCompute(
+                image.width().div_ceil(BlurProgram::GROUP_SIZE.0),
+                image.height().div_ceil(BlurProgram::GROUP_SIZE.1),
+                1,
+            );
+            // gl::Finish();
+            // let error = gl::GetError();
+            // assert_eq!(error, gl::NO_ERROR);
+
+            intermadiate_buffer.bind_image_texture(BlurProgram::INPUT_BINDING_UNIT, gl::READ_ONLY);
+            output_buffer.bind_image_texture(BlurProgram::OUPUT_BINDING_UNIT, gl::WRITE_ONLY);
+            program.set_vertical();
+            gl::DispatchCompute(
+                image.width().div_ceil(BlurProgram::GROUP_SIZE.0),
+                image.height().div_ceil(BlurProgram::GROUP_SIZE.1),
+                1,
+            );
             gl::Finish();
-            println!("{:?}", output_buffer.data());
+            println!("Finished: {}", t.elapsed().as_millis());
+            let error = gl::GetError();
+            assert_eq!(error, gl::NO_ERROR);
+
+            // println!("{:?}", output_buffer.data());
+            image::save_buffer(
+                "test.jpg",
+                output_buffer.data(),
+                image.width(),
+                image.height(),
+                ExtendedColorType::Rgb8,
+            )
+            .unwrap();
+            println!("Image saved: {}", t.elapsed().as_millis());
         }
 
         Some(Self {})
     }
 }
 
-struct BlurShader {
-    shader: u32,
-    _marker: PhantomData<*const ()>, // Neither Send and Sync
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+struct ImageData {
+    offset: i32,
+    width: i32,
+    height: i32,
 }
 
-impl BlurShader {
-    const SRC: &'static str = r#"
-#version 450 core
+fn gaussian_kernel(size: usize, sigma: f32) -> Vec<f32> {
+    assert!(size % 2 == 1, "Size of the kernel should be odd.");
 
-layout(local_size_x = 8, local_size_y = 8) in;
-layout(binding = 0, r8) readonly uniform imageBuffer input_image;
-layout(binding = 1, r8) writeonly uniform imageBuffer output_image;
-layout(std140, binding = 2) uniform ImageData {
-    int offset;
-    int width;
-    int height;
-};
+    let mut kernel = Vec::with_capacity(size);
+    let half_size = (size / 2) as isize;
+    let sigma2 = sigma * sigma;
+    let normalization_factor = 1.0 / (2.0 * std::f32::consts::PI * sigma2).sqrt();
+    let mut sum = 0.0;
 
-const int RGB = 3;
-
-ivec3 get_indecies(ivec2 pos) {
-    int x = pos.x * RGB;
-    int y = pos.y * width * RGB;
-
-    int r_index = x + y;
-    int g_index = x + y + 1;
-    int b_index = x + y + 2;
-
-    return ivec3(r_index, g_index, b_index);
-}
-
-vec3 fetch_pixel(ivec2 pos) {
-    ivec3 indecies = get_indecies(pos);
-
-    float r = imageLoad(input_image, indecies.r).r;
-    float g = imageLoad(input_image, indecies.g).r;
-    float b = imageLoad(input_image, indecies.b).r;
-
-    return vec3(r, g, b); 
-}
-
-void write_pixel(ivec2 pos, vec3 pixel) {
-    ivec3 indecies = get_indecies(pos);
-
-    imageStore(output_image, indecies.r, vec4(pixel.r));
-    imageStore(output_image, indecies.g, vec4(pixel.g));
-    imageStore(output_image, indecies.b, vec4(pixel.b));
-}
-
-void main() {
-    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
-    vec3 pixel = fetch_pixel(pos);
-    write_pixel(pos, pixel);
-}
-"#;
-
-    pub const GROUP_SIZE: (usize, usize) = (8, 8);
-
-    fn new() -> Option<Self> {
-        unsafe {
-            let shader = gl::CreateShader(gl::COMPUTE_SHADER);
-
-            if shader == 0 {
-                return None;
-            }
-
-            let src = CString::new(Self::SRC).ok()?;
-            gl::ShaderSource(shader, 1, &src.as_ptr(), &(src.count_bytes() as i32));
-            gl::CompileShader(shader);
-            let mut compiled = 0;
-            gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut compiled);
-
-            if compiled == gl::FALSE as i32 {
-                return None;
-            }
-
-            Some(Self {
-                shader,
-                _marker: PhantomData,
-            })
-        }
-    }
-}
-
-impl Drop for BlurShader {
-    fn drop(&mut self) {
-        unsafe {
-            gl::DeleteShader(self.shader);
-        }
-    }
-}
-
-struct BlurProgram {
-    program: u32,
-    _marker: PhantomData<*const ()>, // Neither Send and Sync
-}
-
-impl BlurProgram {
-    fn new() -> Option<Self> {
-        let shader = BlurShader::new()?;
-        unsafe {
-            let program = gl::CreateProgram();
-            gl::AttachShader(program, shader.shader);
-            gl::LinkProgram(program);
-            let mut success = 0;
-            gl::GetProgramiv(program, gl::LINK_STATUS, &mut success);
-
-            if success == gl::FALSE as i32 {
-                return None;
-            }
-
-            Some(Self {
-                program,
-                _marker: PhantomData,
-            })
-        }
+    for i in -half_size..=half_size {
+        let value = normalization_factor * (-((i * i) as f32) / (2.0 * sigma2)).exp();
+        kernel.push(value);
+        sum += value;
     }
 
-    fn use_(&self) {
-        unsafe {
-            gl::UseProgram(self.program);
-        }
-    }
+    (0..size).for_each(|i| {
+        kernel[i] /= sum;
+    });
+
+    kernel
 }
 
-impl Drop for BlurProgram {
-    fn drop(&mut self) {
-        unsafe {
-            gl::DeleteProgram(self.program);
-        }
-    }
+fn kernel_to_glsl(kernel: Vec<f32>) -> String {
+    let size = format!("const int KERNEL_SIZE = {};\n", kernel.len());
+    let str: String = kernel
+        .iter()
+        .map(|item| {
+            let mut str = item.to_string();
+            str.push_str(", ");
+            str
+        })
+        .collect();
+    let str = str.trim_end_matches(", ");
+    let array = format!(
+        "const float[KERNEL_SIZE] KERNEL = float[KERNEL_SIZE]({});\n",
+        str
+    );
+    size + &array
 }

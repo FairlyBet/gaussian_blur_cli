@@ -16,6 +16,7 @@ impl WritableImageBuffer {
         unsafe {
             let target = gl::TEXTURE_BUFFER;
             let flags = gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT;
+            let isize: isize = size.try_into().ok()?;
 
             let mut buffer = 0;
             gl::GenBuffers(1, &mut buffer);
@@ -23,8 +24,8 @@ impl WritableImageBuffer {
                 return None;
             }
             gl::BindBuffer(target, buffer);
-            gl::BufferStorage(target, size as isize, ptr::null(), flags);
-            let ptr = gl::MapBufferRange(target, 0, size as isize, flags);
+            gl::BufferStorage(target, isize, ptr::null(), flags);
+            let ptr = gl::MapBufferRange(target, 0, isize, flags);
             if ptr.is_null() {
                 return None;
             }
@@ -98,6 +99,7 @@ impl ReadableImageBuffer {
         unsafe {
             let target = gl::TEXTURE_BUFFER;
             let flags = gl::MAP_READ_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT;
+            let isize: isize = size.try_into().ok()?;
 
             let mut buffer = 0;
             gl::GenBuffers(1, &mut buffer);
@@ -105,8 +107,8 @@ impl ReadableImageBuffer {
                 return None;
             }
             gl::BindBuffer(target, buffer);
-            gl::BufferStorage(target, size as isize, ptr::null(), flags);
-            let ptr = gl::MapBufferRange(target, 0, size as isize, flags);
+            gl::BufferStorage(target, isize, ptr::null(), flags);
+            let ptr = gl::MapBufferRange(target, 0, isize, flags);
             if ptr.is_null() {
                 return None;
             }
@@ -181,6 +183,8 @@ impl ImageBuffer {
         // In case of not loaded OpenGL functions it will result panicing
         unsafe {
             let target = gl::TEXTURE_BUFFER;
+            let isize: isize = size.try_into().ok()?;
+
             let mut buffer = 0;
             gl::GenBuffers(1, &mut buffer);
             if buffer == 0 {
@@ -189,7 +193,7 @@ impl ImageBuffer {
             gl::BindBuffer(target, buffer);
             gl::BufferData(
                 gl::TEXTURE_BUFFER,
-                size as isize,
+                isize,
                 std::ptr::null(),
                 gl::DYNAMIC_DRAW,
             );
@@ -243,17 +247,13 @@ impl<T> UniformBuffer<T> {
     pub fn new() -> Option<Self> {
         unsafe {
             let mut buffer = 0;
+            let isize: isize = mem::size_of::<T>().try_into().ok()?;
             gl::GenBuffers(1, &mut buffer);
             if buffer == 0 {
                 return None;
             }
             gl::BindBuffer(gl::UNIFORM_BUFFER, buffer);
-            gl::BufferData(
-                gl::UNIFORM_BUFFER,
-                mem::size_of::<T>() as isize,
-                ptr::null(),
-                gl::STREAM_DRAW,
-            );
+            gl::BufferData(gl::UNIFORM_BUFFER, isize, ptr::null(), gl::STREAM_DRAW);
             Some(Self {
                 buffer,
                 _marker: PhantomData,

@@ -1,11 +1,8 @@
 mod blur_render;
 mod buffer;
+mod blur_shader;
 
-use anyhow::anyhow;
 use blur_render::Renderer;
-use buffer::{ImageBuffer, ReadableImageBuffer, WritableImageBuffer};
-use glfw::{fail_on_errors, ClientApiHint, OpenGlProfileHint, WindowHint, WindowMode};
-use image::EncodableLayout as _;
 
 fn main() -> anyhow::Result<()> {
     // let packed: &[u32] = &[1, 2, 3, 4];
@@ -40,19 +37,9 @@ fn main() -> anyhow::Result<()> {
     // }
 
     // Simple way to set up offscreen rendering is just to use invisible window
-    let mut glfw = glfw::init(fail_on_errors!())?;
-    glfw.window_hint(WindowHint::ClientApi(ClientApiHint::OpenGl));
-    glfw.window_hint(WindowHint::OpenGlProfile(OpenGlProfileHint::Core));
-    glfw.window_hint(WindowHint::ContextVersion(4, 5));
-    glfw.window_hint(WindowHint::Visible(false));
 
-    let (mut w, _) = glfw
-        .create_window(1, 1, "", WindowMode::Windowed)
-        .ok_or(anyhow!("Can't create window"))?;
+    Renderer::new(43, 20.0);
 
-    gl::load_with(|symbol| w.get_proc_address(symbol));
-    println!("{:?}", Renderer::new());
-    
     // unsafe {
     // let size = 100;
 
@@ -89,26 +76,4 @@ fn main() -> anyhow::Result<()> {
     // std::io::stdin().read_line(&mut String::new())?;
 
     Ok(())
-}
-
-fn gaussian_kernel_1d(size: usize, sigma: f32) -> Vec<f32> {
-    assert!(size % 2 == 1, "Size of the kernel should be odd.");
-
-    let mut kernel = Vec::with_capacity(size);
-    let half_size = (size / 2) as isize;
-    let sigma2 = sigma * sigma;
-    let normalization_factor = 1.0 / (2.0 * std::f32::consts::PI * sigma2).sqrt();
-    let mut sum = 0.0;
-
-    for i in -half_size..=half_size {
-        let value = normalization_factor * (-((i * i) as f32) / (2.0 * sigma2)).exp();
-        kernel.push(value);
-        sum += value;
-    }
-
-    (0..size).for_each(|i| {
-        kernel[i] /= sum;
-    });
-
-    kernel
 }
