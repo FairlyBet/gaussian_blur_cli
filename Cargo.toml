@@ -1,0 +1,10 @@
+[package]
+name = "gaussian_blur_cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gl = "0.14.0"
+glfw = "0.58.0"
+anyhow = "1.0.86"
+image = "0.25.2"
