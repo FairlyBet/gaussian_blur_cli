@@ -1,5 +1,5 @@
 use crate::{
-    blur_shader::BlurProgram,
+    blur_program::BlurProgram,
     buffer::{ImageBuffer, ReadableImageBuffer, UniformBuffer, WritableImageBuffer},
 };
 use glfw::{fail_on_errors, ClientApiHint, OpenGlProfileHint, WindowHint, WindowMode};
@@ -9,7 +9,7 @@ use image::ExtendedColorType;
 pub struct Renderer {}
 
 impl Renderer {
-    pub fn new(kernel_size: usize, sigma: f32) -> Option<Self> {
+    pub fn new(sigma: f32) -> Option<Self> {
         let mut glfw = glfw::init(fail_on_errors!()).ok()?;
         glfw.window_hint(WindowHint::ClientApi(ClientApiHint::OpenGl));
         glfw.window_hint(WindowHint::OpenGlProfile(OpenGlProfileHint::Core));
@@ -21,67 +21,67 @@ impl Renderer {
         let t = std::time::Instant::now();
         let image = image::open("sample.jpg").unwrap();
         println!("Image open: {}", t.elapsed().as_millis());
-        let bytes = image.as_rgb8().unwrap().as_raw();
+        let b = image.blur(sigma);
+        println!("CPU Finished: {}", t.elapsed().as_millis());
+        b.save("test2.jpg").unwrap();
+        
+        // let bytes = image.as_rgb8().unwrap().as_raw();
 
-        let mut input_buffer = WritableImageBuffer::new(bytes.len())?;
-        let intermadiate_buffer = ImageBuffer::new(bytes.len())?;
-        let output_buffer = ReadableImageBuffer::new(bytes.len())?;
-        let mut uniform_buffer = UniformBuffer::<ImageData>::new()?;
-        uniform_buffer.update(ImageData {
-            offset: 0,
-            width: image.width() as i32,
-            height: image.height() as i32,
-        });
+        // let mut input_buffer = WritableImageBuffer::new(bytes.len())?;
+        // let intermadiate_buffer = ImageBuffer::new(bytes.len())?;
+        // let output_buffer = ReadableImageBuffer::new(bytes.len())?;
+        // let mut uniform_buffer = UniformBuffer::<ImageData>::new()?;
+        // uniform_buffer.update(ImageData {
+        //     offset: 0,
+        //     width: image.width() as i32,
+        //     height: image.height() as i32,
+        // });
 
-        let kernel = gaussian_kernel(kernel_size, sigma);
-        let kernel = kernel_to_glsl(kernel);
-        let program = BlurProgram::new(&kernel, w.get_context_version())?;
-        program.use_();
+        // let kernel = gaussian_kernel(6 * sigma as usize + 1, sigma);
+        // let kernel = kernel_to_glsl(kernel);
+        // let program = BlurProgram::new(&kernel, w.get_context_version())?;
+        // program.use_();
 
-        unsafe {
-            input_buffer.data().copy_from_slice(bytes);
-            println!("Ready for render: {}", t.elapsed().as_millis());
-            // .iter_mut()
-            // .enumerate()
-            // .for_each(|(i, item)| *item = i as u8);
-            uniform_buffer.bind_buffer_base(BlurProgram::UNIFORM_BINDING_POINT);
+        // unsafe {
+        //     input_buffer.data().copy_from_slice(bytes);
+        //     println!("Ready for render: {}", t.elapsed().as_millis());
+        //     // .iter_mut()
+        //     // .enumerate()
+        //     // .for_each(|(i, item)| *item = i as u8);
+        //     uniform_buffer.bind_buffer_base(BlurProgram::UNIFORM_BINDING_POINT);
 
-            input_buffer.bind_image_texture(BlurProgram::INPUT_BINDING_UNIT, gl::READ_ONLY);
-            intermadiate_buffer.bind_image_texture(BlurProgram::OUPUT_BINDING_UNIT, gl::WRITE_ONLY);
-            program.set_horizontal();
-            gl::DispatchCompute(
-                image.width().div_ceil(BlurProgram::GROUP_SIZE.0),
-                image.height().div_ceil(BlurProgram::GROUP_SIZE.1),
-                1,
-            );
-            // gl::Finish();
-            // let error = gl::GetError();
-            // assert_eq!(error, gl::NO_ERROR);
+        //     input_buffer.bind_image_texture(BlurProgram::INPUT_BINDING_UNIT, gl::READ_ONLY);
+        //     intermadiate_buffer.bind_image_texture(BlurProgram::OUPUT_BINDING_UNIT, gl::WRITE_ONLY);
+        //     program.set_horizontal();
+        //     gl::DispatchCompute(
+        //         image.width().div_ceil(BlurProgram::GROUP_SIZE.0),
+        //         image.height().div_ceil(BlurProgram::GROUP_SIZE.1),
+        //         1,
+        //     );
 
-            intermadiate_buffer.bind_image_texture(BlurProgram::INPUT_BINDING_UNIT, gl::READ_ONLY);
-            output_buffer.bind_image_texture(BlurProgram::OUPUT_BINDING_UNIT, gl::WRITE_ONLY);
-            program.set_vertical();
-            gl::DispatchCompute(
-                image.width().div_ceil(BlurProgram::GROUP_SIZE.0),
-                image.height().div_ceil(BlurProgram::GROUP_SIZE.1),
-                1,
-            );
-            gl::Finish();
-            println!("Finished: {}", t.elapsed().as_millis());
-            let error = gl::GetError();
-            assert_eq!(error, gl::NO_ERROR);
+        //     intermadiate_buffer.bind_image_texture(BlurProgram::INPUT_BINDING_UNIT, gl::READ_ONLY);
+        //     output_buffer.bind_image_texture(BlurProgram::OUPUT_BINDING_UNIT, gl::WRITE_ONLY);
+        //     program.set_vertical();
+        //     gl::DispatchCompute(
+        //         image.width().div_ceil(BlurProgram::GROUP_SIZE.0),
+        //         image.height().div_ceil(BlurProgram::GROUP_SIZE.1),
+        //         1,
+        //     );
+        //     gl::Finish();
+        //     println!("Finished: {}", t.elapsed().as_millis());
+        //     let error = gl::GetError();
+        //     assert_eq!(error, gl::NO_ERROR);
 
-            // println!("{:?}", output_buffer.data());
-            image::save_buffer(
-                "test.jpg",
-                output_buffer.data(),
-                image.width(),
-                image.height(),
-                ExtendedColorType::Rgb8,
-            )
-            .unwrap();
-            println!("Image saved: {}", t.elapsed().as_millis());
-        }
+        //     image::save_buffer(
+        //         "test.jpg",
+        //         output_buffer.data(),
+        //         image.width(),
+        //         image.height(),
+        //         ExtendedColorType::Rgb8,
+        //     )
+        //     .unwrap();
+        //     println!("Image saved: {}", t.elapsed().as_millis());
+        // }
 
         Some(Self {})
     }

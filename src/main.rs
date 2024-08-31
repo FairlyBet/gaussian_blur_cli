@@ -1,6 +1,6 @@
 mod blur_render;
 mod buffer;
-mod blur_shader;
+mod blur_program;
 
 use blur_render::Renderer;
 
@@ -38,7 +38,7 @@ fn main() -> anyhow::Result<()> {
 
     // Simple way to set up offscreen rendering is just to use invisible window
 
-    Renderer::new(43, 20.0);
+    Renderer::new(20.0);
 
     // unsafe {
     // let size = 100;

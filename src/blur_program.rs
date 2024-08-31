@@ -8,7 +8,7 @@ pub struct BlurProgram {
 }
 
 impl BlurProgram {
-    pub const GROUP_SIZE: (u32, u32) = (8, 8);
+    pub const GROUP_SIZE: (u32, u32) = (4, 4);
     pub const INPUT_BINDING_UNIT: u32 = 0;
     pub const OUPUT_BINDING_UNIT: u32 = 1;
     pub const UNIFORM_BINDING_POINT: u32 = 2;
