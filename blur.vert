@@ -1,49 +1,48 @@
-#version 450 core
+#version 430 core
 
-// layout(local_size_x = 8, local_size_y = 8) in;
-layout(binding = 0, r8) readonly uniform imageBuffer input_image;
-layout(binding = 1, r8) writeonly uniform imageBuffer output_image;
+// layout(local_size_x = 2, local_size_y = 2) in;
+layout(binding = 0, rgba8) readonly uniform imageBuffer input_image;
+layout(binding = 1, rgba8) writeonly uniform imageBuffer output_image;
 layout(std140, binding = 2) uniform ImageData {
-int offset;
-int width;
-int height;
+    int offset;
+    int width;
+    int height;
 };
+const int KERNEL_SIZE = 43;
+const float[KERNEL_SIZE] KERNEL = float[KERNEL_SIZE](0.000634461, 0.00096405006, 0.0014352618, 0.0020936271, 0.002992296, 0.004190314, 0.0057494384, 0.0077293175, 0.010181077, 0.01313963, 0.016615346, 0.020586025, 0.024990356, 0.029724136, 0.034640398, 0.03955427, 0.044252794, 0.04850929, 0.052100986, 0.05482818, 0.056532543, 0.057112362, 0.056532543, 0.05482818, 0.052100986, 0.04850929, 0.044252794, 0.03955427, 0.034640398, 
+0.029724136, 0.024990356, 0.020586025, 0.016615346, 0.01313963, 0.010181077, 0.0077293175, 0.0057494384, 0.004190314, 0.002992296, 0.0020936271, 0.0014352618, 0.00096405006, 0.000634461);
 
-const int RGB = 3;
-const int KERNEL_SIZE = 33;
-const float[KERNEL_SIZE] KERNEL = float[KERNEL_SIZE](0.012308157, 0.014371717, 0.016614275, 0.019015647, 0.021547552, 0.024173625, 0.026849903, 0.029525734, 0.03214517, 0.03464877, 0.03697575, 0.039066378, 0.04086452, 0.042320102, 0.04339144, 0.044047218, 0.044268005, 0.044047218, 0.04339144, 0.042320102, 0.04086452, 0.039066378, 0.03697575, 0.03464877, 0.03214517, 0.029525734, 0.026849903, 0.024173625, 0.021547552, 0.019015647, 0.016614275, 0.014371717, 0.012308157);
+uniform ivec2 direction;
 
-ivec3 get_indecies(ivec2 pos) {
-int x = pos.x * RGB;
-int y = pos.y * width * RGB;
+const int RGBA = 4;
 
-int r_index = x + y;
-int g_index = x + y + 1;
-int b_index = x + y + 2;
-
-return ivec3(r_index, g_index, b_index);
+vec4 fetch_pixel(ivec2 pos) {
+    int x = pos.x * RGBA;
+    int y = pos.y * width * RGBA;
+    return imageLoad(input_image, x + y);
 }
 
-vec3 fetch_pixel(ivec2 pos) {
-ivec3 indecies = get_indecies(pos);
-
-float r = imageLoad(input_image, indecies.r).r;
-float g = imageLoad(input_image, indecies.g).r;
-float b = imageLoad(input_image, indecies.b).r;
-
-return vec3(r, g, b);
-}
-
-void write_pixel(ivec2 pos, vec3 pixel) {
-ivec3 indecies = get_indecies(pos);
-
-imageStore(output_image, indecies.r, vec4(pixel.r));
-imageStore(output_image, indecies.g, vec4(pixel.g));
-imageStore(output_image, indecies.b, vec4(pixel.b));
+void write_pixel(ivec2 pos, vec4 pixel) {
+    int x = pos.x * RGBA;
+    int y = pos.y * width * RGBA;
+    imageStore(output_image, x + y, pixel);
 }
 
 void main() {
     // ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
-    // vec3 pixel = fetch_pixel(pos);
-    // write_pixel(pos, pixel);
+    ivec2 pos = ivec2(0, 0);
+
+    if (pos.x >= width || pos.y >= height) return;
+
+    vec4 sum = vec4(0.0);
+    for (int i = 0; i < KERNEL_SIZE; ++i)
+    {
+        ivec2 npos = pos + direction * (i - KERNEL_SIZE / 2);
+        if (npos.x < 0) npos.x = 0;
+        if (npos.y < 0) npos.y = 0;
+        if (npos.x >= width) npos.x = width - 1;
+        if (npos.y >= height) npos.y = height - 1;
+        sum += KERNEL[i] * fetch_pixel(npos);
+    }
+    write_pixel(pos, sum);
 }

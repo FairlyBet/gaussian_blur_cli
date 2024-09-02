@@ -3,7 +3,7 @@ use crate::{
     buffer::{ImageBuffer, UniformBuffer},
 };
 use glfw::{fail_on_errors, ClientApiHint, OpenGlProfileHint, WindowHint, WindowMode};
-use image::{ColorType, ExtendedColorType, ImageDecoder, ImageFormat, Limits};
+use image::{ColorType, ExtendedColorType, ImageDecoder, ImageFormat, Limits, Pixel, Rgb, Rgba};
 use std::{fs::File, io::BufReader};
 
 #[derive(Debug)]
@@ -20,10 +20,18 @@ impl Renderer {
         gl::load_with(|symbol| w.get_proc_address(symbol));
         let t = std::time::Instant::now();
 
-        let decoder = get_decoder("sample.jpg").unwrap();
-        let (width, height) = decoder.dimensions();
-        let size = decoder.total_bytes() as usize;
-        let original_color_type = decoder.original_color_type();
+        // println!("{:?}", image.color());
+        let image = image::open("sample.jpg").unwrap().to_rgba8();
+        // let image = image.as_rgb8().unwrap();
+        let (width, height) = image.dimensions();
+        let bytes: &[u8] = image.as_raw();
+        let size = bytes.len();
+        // let size = (width * height * 4) as usize;
+
+        // let decoder = get_decoder("sample.webp").unwrap();
+        // let (width, height) = decoder.dimensions();
+        // let size = decoder.total_bytes() as usize;
+        // let original_color_type = decoder.original_color_type();
 
         let mut input_buffer = ImageBuffer::new_writable(size)?;
         let intermadiate_buffer = ImageBuffer::new(size)?;
@@ -40,15 +48,27 @@ impl Renderer {
         program.use_();
 
         unsafe {
-            decoder.read_image(input_buffer.data()).unwrap();
+            // let mut i = 0;
+            // bytes.chunks_exact(3).for_each(|pixel| {
+            //     input_buffer.data()[i..i + 3].copy_from_slice(pixel);
+            //     input_buffer.data()[i + 3] = 255;
+            //     i += 4;
+            // });
+            // decoder.read_image(input_buffer.data()).unwrap();
+            input_buffer.data().copy_from_slice(bytes);
             println!("Ready for render: {}", t.elapsed().as_millis());
+
             uniform_buffer.bind_buffer_base(BlurProgram::UNIFORM_BINDING_POINT);
 
-            input_buffer.bind_image_texture(BlurProgram::INPUT_BINDING_UNIT, gl::READ_ONLY, gl::R8);
+            input_buffer.bind_image_texture(
+                BlurProgram::INPUT_BINDING_UNIT,
+                gl::READ_ONLY,
+                gl::RGBA8,
+            );
             intermadiate_buffer.bind_image_texture(
                 BlurProgram::OUTPUT_BINDING_UNIT,
                 gl::WRITE_ONLY,
-                gl::R8,
+                gl::RGBA8,
             );
             program.set_horizontal();
             gl::DispatchCompute(
@@ -60,12 +80,12 @@ impl Renderer {
             intermadiate_buffer.bind_image_texture(
                 BlurProgram::INPUT_BINDING_UNIT,
                 gl::READ_ONLY,
-                gl::R8,
+                gl::RGBA8,
             );
             output_buffer.bind_image_texture(
                 BlurProgram::OUTPUT_BINDING_UNIT,
                 gl::WRITE_ONLY,
-                gl::R8,
+                gl::RGBA8,
             );
             program.set_vertical();
             gl::DispatchCompute(
@@ -77,12 +97,20 @@ impl Renderer {
             gl::Finish();
             println!("Finished: {}", t.elapsed().as_millis());
 
+            // let image = image::RgbImage::from_fn(width, height, |x, y| {
+            //     let index = (x * 4 + y * width * 4) as usize;
+            //     let pixel = &output_buffer.data()[index..index + 3];
+            //     Rgb([pixel[0], pixel[1], pixel[2]])
+            // });
+            // image.save("test.jpg").unwrap();
+
+            // let rgb = image::RgbaImage
             image::save_buffer(
-                "test.jpg",
+                "test.png",
                 output_buffer.data(),
                 width,
                 height,
-                original_color_type,
+                ColorType::Rgba8,
             )
             .unwrap();
             println!("Image saved: {}", t.elapsed().as_millis());
