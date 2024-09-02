@@ -1,44 +1,11 @@
+mod blur_program;
 mod blur_render;
 mod buffer;
-mod blur_program;
-
-use blur_render::Renderer;
 
 fn main() -> anyhow::Result<()> {
-    // let packed: &[u32] = &[1, 2, 3, 4];
-    // let (widht, height) = (2_usize, 2_usize);
-    // const RGB: usize = 3;
+    // let images = ["", "", ""].map(|item| ImageInfo::new(item).unwrap());
 
-    // for h in 0..height {
-    //     for w in 0..widht {
-    //         let w = w * RGB;
-    //         let h = (h * widht) * RGB;
-
-    //         let r_index = w + h;
-    //         let g_index = w + h + 1;
-    //         let b_index = w + h + 2;
-
-    //         let r_chunk = packed[r_index / size_of::<u32>()];
-    //         let g_chunk = packed[g_index / size_of::<u32>()];
-    //         let b_chunk = packed[b_index / size_of::<u32>()];
-
-    //         let r_shift = r_index % size_of::<u32>();
-    //         let g_shift = g_index % size_of::<u32>();
-    //         let b_shift = b_index % size_of::<u32>();
-
-    //         let r = (r_chunk >> (8 * r_shift)) & 0xFF;
-    //         let g = (g_chunk >> (8 * g_shift)) & 0xFF;
-    //         let b = (b_chunk >> (8 * b_shift)) & 0xFF;
-
-    //         println!("{r} {g} {b}\n");
-
-    //         let rgb = (r, g, b);
-    //     }
-    // }
-
-    // Simple way to set up offscreen rendering is just to use invisible window
-
-    Renderer::new(20.0);
+    blur_render::Renderer::new(20.0);
 
     // unsafe {
     // let size = 100;
