@@ -1,9 +1,9 @@
 #version 430 core
 
 // layout(local_size_x = 2, local_size_y = 2) in;
-layout(binding = 0, rgba8) readonly uniform imageBuffer input_image;
-layout(binding = 1, rgba8) writeonly uniform imageBuffer output_image;
-layout(std140, binding = 2) uniform ImageData {
+layout(binding = 0, rgba8) restrict readonly uniform imageBuffer input_image;
+layout(binding = 1, rgba8) restrict writeonly uniform imageBuffer output_image;
+layout(std140, binding = 2) restrict readonly uniform ImageData {
     int offset;
     int width;
     int height;

@@ -9,14 +9,13 @@ pub struct BlurProgram {
 }
 
 impl BlurProgram {
+    pub const MAX_BUFFER_SIZE: usize = std::i32::MAX as usize;
     pub const INPUT_BINDING_UNIT: u32 = 0;
     pub const OUTPUT_BINDING_UNIT: u32 = 1;
     pub const UNIFORM_BINDING_POINT: u32 = 2;
 
     const SRC: &'static str = r#"
 uniform ivec2 direction;
-
-const int RGBA = 4;
 
 vec4 fetch_pixel(ivec2 pos) {
     int x = pos.x;
@@ -84,9 +83,9 @@ void main() {
         let layout_data = format!(
             r#"
 layout(local_size_x = {}, local_size_y = {}) in;
-layout(binding = {}, rgba8) readonly uniform imageBuffer input_image;
-layout(binding = {}, rgba8) writeonly uniform imageBuffer output_image;
-layout(std140, binding = {}) uniform ImageData {{
+layout(binding = {}, rgba8) restrict readonly uniform imageBuffer input_image;
+layout(binding = {}, rgba8) restrict writeonly uniform imageBuffer output_image;
+layout(std140, binding = {}) restrict readonly uniform ImageData {{
     int offset;
     int width;
     int height;
@@ -171,9 +170,9 @@ impl ComputeShader {
             let src_len: i32 = src.count_bytes().try_into().ok()?;
             gl::ShaderSource(shader, 1, &src.as_ptr(), &src_len);
             gl::CompileShader(shader);
-            let mut compiled = 0;
-            gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut compiled);
-            if compiled == gl::FALSE as i32 {
+            let mut is_compiled = 0;
+            gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut is_compiled);
+            if is_compiled == gl::FALSE as i32 {
                 return None;
             }
 

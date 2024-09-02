@@ -2,7 +2,7 @@ use std::{marker::PhantomData, mem, ptr, slice};
 
 pub struct PersistentRead;
 pub struct PersistentWrite;
-pub struct NonPersistent;
+pub struct Regular;
 
 pub struct ImageBuffer<T> {
     buffer: u32,
@@ -62,7 +62,7 @@ impl<T> ImageBuffer<T> {
     }
 }
 
-impl ImageBuffer<NonPersistent> {
+impl ImageBuffer<Regular> {
     pub fn new(size: usize) -> Option<Self> {
         let isize: isize = size.try_into().ok()?;
         // SAFETY:

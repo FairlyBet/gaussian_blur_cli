@@ -5,7 +5,8 @@ mod buffer;
 fn main() -> anyhow::Result<()> {
     // let images = ["", "", ""].map(|item| ImageInfo::new(item).unwrap());
 
-    blur_render::Renderer::new(7.0);
+    let renderer = blur_render::Renderer::new().unwrap();
+    println!("{}", renderer.max_image_size());
 
     // unsafe {
     // let size = 100;
