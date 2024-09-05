@@ -13,7 +13,7 @@ use image::codecs::{
 };
 use image::{ColorType, ExtendedColorType, ImageDecoder, ImageFormat, Limits, Rgb};
 use rayon::Scope;
-use std::{fs::File, io::BufReader};
+use std::{f32, fs::File, io::BufReader};
 
 #[derive(Debug)]
 pub struct Renderer {
@@ -157,6 +157,7 @@ impl Renderer {
         let progess = 0..0;
 
         let buf = unsafe { buf1.input_buffer.data() };
+
         rayon::scope(|scope| {
             let buf = buf;
             scope.spawn(|scope| {
@@ -184,35 +185,34 @@ impl Renderer {
     }
 
     fn fill_buffer<'a>(
-        infos: &'a mut [ImageInfo],
+        infos: &'a [ImageInfo],
         start: usize,
         mut buffer: &'a mut [u8],
         scope: &Scope<'a>,
-    ) {
-        let mut offset = 0;
+    ) -> usize {
         let mut i = start;
-        let mut handles = vec![];
+        let mut slices = vec![];
         while i < infos.len() {
             let info = &infos[i];
             if info.rgba_size > buffer.len() {
                 break;
             }
-
             let (occupied, free) = buffer.split_at_mut(infos[i].rgba_size);
             buffer = free;
-            let handle = scope.spawn(move |_| {
-                if let Err(err) = fun_name(info, occupied) {
-                    // TODO: use logger
-                    eprintln!("{err}");
-                }
-            });
-            handles.push(handle);
+            slices.push(occupied);
+            // scope.spawn(move |_| {
+            //     if let Err(err) = read_image(info, occupied) {
+            //         // TODO: use logger
+            //         eprintln!("{err}");
+            //     }
+            // });
             i += 1;
         }
+        return i;
     }
 }
 
-fn fun_name(info: &mut ImageInfo<'_>, occupied: &mut [u8]) -> anyhow::Result<()> {
+fn read_image(info: &ImageInfo<'_>, occupied: &mut [u8]) -> anyhow::Result<()> {
     match info.color_type {
         ColorType::Rgb8 => {
             let image = image::open(info.path)?;
@@ -224,7 +224,8 @@ fn fun_name(info: &mut ImageInfo<'_>, occupied: &mut [u8]) -> anyhow::Result<()>
             });
         }
         ColorType::Rgba8 => {
-            info.decoder.take().unwrap().read_image(occupied)?;
+            let decoder = get_decoder(info.path)?;
+            decoder.read_image(occupied)?;
         }
         _ => unreachable!(),
     }
@@ -245,7 +246,7 @@ fn gaussian_kernel(size: usize, sigma: f32) -> Vec<f32> {
     let mut kernel = Vec::with_capacity(size);
     let half_size = (size / 2) as isize;
     let sigma2 = sigma * sigma;
-    let normalization_factor = 1.0 / (2.0 * std::f32::consts::PI * sigma2).sqrt();
+    let normalization_factor = 1.0 / (2.0 * f32::consts::PI * sigma2).sqrt();
     let mut sum = 0.0;
 
     for i in -half_size..=half_size {
@@ -261,6 +262,26 @@ fn gaussian_kernel(size: usize, sigma: f32) -> Vec<f32> {
     kernel
 }
 
+fn get_decoder(path: &str) -> anyhow::Result<Decoder> {
+    let format = ImageFormat::from_path(path)?;
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let decoder: Box<dyn ImageDecoder + Send + Sync> = match format {
+        ImageFormat::Png => Box::new(PngDecoder::with_limits(reader, Limits::default())?),
+        ImageFormat::Jpeg => Box::new(JpegDecoder::new(reader)?),
+        ImageFormat::WebP => Box::new(WebPDecoder::new(reader)?),
+        ImageFormat::Tiff => Box::new(TiffDecoder::new(reader)?),
+        ImageFormat::Tga => Box::new(TgaDecoder::new(reader)?),
+        ImageFormat::Bmp => Box::new(BmpDecoder::new(reader)?),
+        _ => return Err(anyhow!("Unsupported image format")),
+    };
+
+    match decoder.color_type() {
+        ColorType::Rgb8 | ColorType::Rgba8 => Ok(decoder),
+        _ => Err(anyhow!("Unsuppoted color type")),
+    }
+}
+
 fn rgb_size_to_rgba_size(rbg_size: usize) -> Option<usize> {
     rbg_size.checked_add(rbg_size / 3)
 }
@@ -269,7 +290,6 @@ pub type Decoder = Box<dyn ImageDecoder + Send + Sync>;
 
 pub struct ImageInfo<'a> {
     path: &'a str,
-    decoder: Option<Decoder>,
     width: u32,
     height: u32,
     size: u64,
@@ -280,7 +300,7 @@ pub struct ImageInfo<'a> {
 
 impl<'a> ImageInfo<'a> {
     pub fn new(path: &'a str, renderer: &Renderer) -> anyhow::Result<Self> {
-        let decoder = Self::get_decoder(path)?;
+        let decoder = get_decoder(path)?;
         let err = format!("{path} doesn't fit into working buffer");
         let mut rgba_size: usize = decoder
             .total_bytes()
@@ -303,28 +323,7 @@ impl<'a> ImageInfo<'a> {
             original_color_type: decoder.original_color_type(),
             rgba_size,
             color_type,
-            Some(decoder),
         })
-    }
-
-    fn get_decoder(path: &str) -> anyhow::Result<Decoder> {
-        let format = ImageFormat::from_path(path)?;
-        let file = File::open(path)?;
-        let reader = BufReader::new(file);
-        let decoder: Box<dyn ImageDecoder + Send + Sync> = match format {
-            ImageFormat::Png => Box::new(PngDecoder::with_limits(reader, Limits::default())?),
-            ImageFormat::Jpeg => Box::new(JpegDecoder::new(reader)?),
-            ImageFormat::WebP => Box::new(WebPDecoder::new(reader)?),
-            ImageFormat::Tiff => Box::new(TiffDecoder::new(reader)?),
-            ImageFormat::Tga => Box::new(TgaDecoder::new(reader)?),
-            ImageFormat::Bmp => Box::new(BmpDecoder::new(reader)?),
-            _ => return Err(anyhow!("Unsupported image format")),
-        };
-
-        match decoder.color_type() {
-            ColorType::Rgb8 | ColorType::Rgba8 => Ok(decoder),
-            _ => Err(anyhow!("Unsuppoted color type")),
-        }
     }
 
     pub fn path(&self) -> &str {

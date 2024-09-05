@@ -51,10 +51,6 @@ impl<T> ImageBuffer<T> {
         }
     }
 
-    pub fn size(&self) -> usize {
-        self.size
-    }
-
     pub unsafe fn bind_image_texture(&self, unit: u32, access: u32, format: u32) {
         gl::BindTexture(Self::TARGET, self.texture);
         gl::TexBuffer(Self::TARGET, format, self.buffer);
