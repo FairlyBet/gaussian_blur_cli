@@ -12,6 +12,7 @@ use image::codecs::{
     webp::WebPDecoder,
 };
 use image::{ColorType, ExtendedColorType, ImageDecoder, ImageFormat, Limits, Rgb};
+use rayon::Scope;
 use std::{fs::File, io::BufReader};
 
 #[derive(Debug)]
@@ -146,13 +147,28 @@ impl Renderer {
             }
         }
 
-        let buf1 = WorkingBuffer::new(config.working_buffer_size)
-            .ok_or(anyhow!("Cannot create working buffer"));
+        let mut buf1 = WorkingBuffer::new(config.working_buffer_size)
+            .ok_or(anyhow!("Cannot create working buffer"))?;
         let buf2 = WorkingBuffer::new(config.working_buffer_size)
-            .ok_or(anyhow!("Cannot create working buffer"));
+            .ok_or(anyhow!("Cannot create working buffer"))?;
         let intermediate_buffer = ImageBuffer::new(config.working_buffer_size)
-            .ok_or(anyhow!("Cannot create working buffer"));
+            .ok_or(anyhow!("Cannot create working buffer"))?;
 
+        let progess = 0..0;
+
+        let buf = unsafe { buf1.input_buffer.data() };
+        rayon::scope(|scope| {
+            let buf = buf;
+            scope.spawn(|scope| {
+                Self::fill_buffer(&infos, progess.end, buf, scope);
+            });
+        });
+        // rayon::scope(|scope| unsafe {
+        //     Self::fill_buffer(&infos, progess.end, buf1.input_buffer.data(), scope);
+        // });
+        // std::thread::scope(|scope| unsafe {
+        // Self::fill_buffer(&infos, progess.end, buf1.input_buffer.data(), scope);
+        // });
         // let slice = &mut [1, 2, 3, 4, 5];
         // slice.split_at_mut(mid)
         // let v = vec![&mut slice[0..1], &mut slice[1..2], &mut slice[2..]];
@@ -167,22 +183,52 @@ impl Renderer {
         Ok(())
     }
 
-    fn fill_buffer(mut infos: Vec<ImageInfo>, mut buf_size: usize) {
+    fn fill_buffer<'a>(
+        infos: &'a mut [ImageInfo],
+        start: usize,
+        mut buffer: &'a mut [u8],
+        scope: &Scope<'a>,
+    ) {
         let mut offset = 0;
-        let mut data = vec![];
-        while let Some(i) = infos
-            .iter()
-            .enumerate()
-            .find(|(_, item)| item.rgba_size <= buf_size)
-            .map(|(i, _)| i)
-        {
-            let info = infos.remove(i);
-            // add convertions
-            data.push(ImageData { offset, width: info.width, height: info.height });
-            offset += info.rgba_size;
+        let mut i = start;
+        let mut handles = vec![];
+        while i < infos.len() {
+            let info = &infos[i];
+            if info.rgba_size > buffer.len() {
+                break;
+            }
+
+            let (occupied, free) = buffer.split_at_mut(infos[i].rgba_size);
+            buffer = free;
+            let handle = scope.spawn(move |_| {
+                if let Err(err) = fun_name(info, occupied) {
+                    // TODO: use logger
+                    eprintln!("{err}");
+                }
+            });
+            handles.push(handle);
+            i += 1;
         }
-        //
     }
+}
+
+fn fun_name(info: &mut ImageInfo<'_>, occupied: &mut [u8]) -> anyhow::Result<()> {
+    match info.color_type {
+        ColorType::Rgb8 => {
+            let image = image::open(info.path)?;
+            let image = image.as_rgb8().unwrap();
+            let mut i = 0;
+            image.as_raw().chunks_exact(3).for_each(|pixel| {
+                occupied[i..i + 3].copy_from_slice(pixel);
+                i += 4;
+            });
+        }
+        ColorType::Rgba8 => {
+            info.decoder.take().unwrap().read_image(occupied)?;
+        }
+        _ => unreachable!(),
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -219,11 +265,11 @@ fn rgb_size_to_rgba_size(rbg_size: usize) -> Option<usize> {
     rbg_size.checked_add(rbg_size / 3)
 }
 
-pub type Decoder = Box<dyn ImageDecoder>;
+pub type Decoder = Box<dyn ImageDecoder + Send + Sync>;
 
 pub struct ImageInfo<'a> {
     path: &'a str,
-    decoder: Decoder,
+    decoder: Option<Decoder>,
     width: u32,
     height: u32,
     size: u64,
@@ -257,7 +303,7 @@ impl<'a> ImageInfo<'a> {
             original_color_type: decoder.original_color_type(),
             rgba_size,
             color_type,
-            decoder,
+            Some(decoder),
         })
     }
 
@@ -265,7 +311,7 @@ impl<'a> ImageInfo<'a> {
         let format = ImageFormat::from_path(path)?;
         let file = File::open(path)?;
         let reader = BufReader::new(file);
-        let decoder: Box<dyn ImageDecoder> = match format {
+        let decoder: Box<dyn ImageDecoder + Send + Sync> = match format {
             ImageFormat::Png => Box::new(PngDecoder::with_limits(reader, Limits::default())?),
             ImageFormat::Jpeg => Box::new(JpegDecoder::new(reader)?),
             ImageFormat::WebP => Box::new(WebPDecoder::new(reader)?),
