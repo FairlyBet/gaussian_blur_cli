@@ -7,6 +7,10 @@ use glfw::{
     fail_on_errors, ClientApiHint, GlfwReceiver, OpenGlProfileHint, PWindow, WindowEvent,
     WindowHint, WindowMode,
 };
+use image::codecs::{
+    bmp::BmpDecoder, jpeg::JpegDecoder, png::PngDecoder, tga::TgaDecoder, tiff::TiffDecoder,
+    webp::WebPDecoder,
+};
 use image::{ColorType, ExtendedColorType, ImageDecoder, ImageFormat, Limits, Rgb};
 use std::{fs::File, io::BufReader};
 
@@ -146,7 +150,7 @@ impl Renderer {
             .ok_or(anyhow!("Cannot create working buffer"));
         let buf2 = WorkingBuffer::new(config.working_buffer_size)
             .ok_or(anyhow!("Cannot create working buffer"));
-        let intermadiate_buffer = ImageBuffer::new(config.working_buffer_size)
+        let intermediate_buffer = ImageBuffer::new(config.working_buffer_size)
             .ok_or(anyhow!("Cannot create working buffer"));
 
         // let slice = &mut [1, 2, 3, 4, 5];
@@ -163,7 +167,20 @@ impl Renderer {
         Ok(())
     }
 
-    fn fill_buffer_from_ohter_thread() {
+    fn fill_buffer(mut infos: Vec<ImageInfo>, mut buf_size: usize) {
+        let mut offset = 0;
+        let mut data = vec![];
+        while let Some(i) = infos
+            .iter()
+            .enumerate()
+            .find(|(_, item)| item.rgba_size <= buf_size)
+            .map(|(i, _)| i)
+        {
+            let info = infos.remove(i);
+            // add convertions
+            data.push(ImageData { offset, width: info.width, height: info.height });
+            offset += info.rgba_size;
+        }
         //
     }
 }
@@ -198,6 +215,10 @@ fn gaussian_kernel(size: usize, sigma: f32) -> Vec<f32> {
     kernel
 }
 
+fn rgb_size_to_rgba_size(rbg_size: usize) -> Option<usize> {
+    rbg_size.checked_add(rbg_size / 3)
+}
+
 pub type Decoder = Box<dyn ImageDecoder>;
 
 pub struct ImageInfo<'a> {
@@ -208,15 +229,39 @@ pub struct ImageInfo<'a> {
     size: u64,
     original_color_type: ExtendedColorType,
     color_type: ColorType,
+    rgba_size: usize,
 }
 
 impl<'a> ImageInfo<'a> {
-    fn get_decoder(path: &str) -> anyhow::Result<Decoder> {
-        use image::codecs::{
-            bmp::BmpDecoder, jpeg::JpegDecoder, png::PngDecoder, tga::TgaDecoder,
-            tiff::TiffDecoder, webp::WebPDecoder,
-        };
+    pub fn new(path: &'a str, renderer: &Renderer) -> anyhow::Result<Self> {
+        let decoder = Self::get_decoder(path)?;
+        let err = format!("{path} doesn't fit into working buffer");
+        let mut rgba_size: usize = decoder
+            .total_bytes()
+            .try_into()
+            .map_err(|_| anyhow!(err.clone()))?;
+        let color_type = decoder.color_type();
+        if color_type == ColorType::Rgb8 {
+            rgba_size = rgb_size_to_rgba_size(rgba_size).ok_or(anyhow!(err.clone()))?;
+        }
 
+        if rgba_size > renderer.max_image_size {
+            return Err(anyhow!(err));
+        }
+
+        Ok(Self {
+            path,
+            width: decoder.dimensions().0,
+            height: decoder.dimensions().1,
+            size: decoder.total_bytes(),
+            original_color_type: decoder.original_color_type(),
+            rgba_size,
+            color_type,
+            decoder,
+        })
+    }
+
+    fn get_decoder(path: &str) -> anyhow::Result<Decoder> {
         let format = ImageFormat::from_path(path)?;
         let file = File::open(path)?;
         let reader = BufReader::new(file);
@@ -232,36 +277,8 @@ impl<'a> ImageInfo<'a> {
 
         match decoder.color_type() {
             ColorType::Rgb8 | ColorType::Rgba8 => Ok(decoder),
-            _ => Err(anyhow!("Unsuppoted color format")),
+            _ => Err(anyhow!("Unsuppoted color type")),
         }
-    }
-
-    pub fn new(path: &'a str, renderer: &Renderer) -> anyhow::Result<Self> {
-        let decoder = Self::get_decoder(path)?;
-        let color_type = decoder.color_type();
-
-        let err = format!("{} doesn't fit into working buffer", path);
-        let mut size: usize = decoder
-            .total_bytes()
-            .try_into()
-            .map_err(|_| anyhow!(err.clone()))?;
-        if color_type == ColorType::Rgb8 {
-            size = size.checked_add(size / 3).ok_or(anyhow!(err.clone()))?;
-        }
-
-        if size > renderer.max_image_size {
-            return Err(anyhow!(err));
-        }
-
-        Ok(Self {
-            path,
-            width: decoder.dimensions().0,
-            height: decoder.dimensions().1,
-            size: decoder.total_bytes(),
-            original_color_type: decoder.original_color_type(),
-            color_type: decoder.color_type(),
-            decoder,
-        })
     }
 
     pub fn path(&self) -> &str {
