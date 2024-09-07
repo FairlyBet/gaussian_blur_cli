@@ -1,6 +1,6 @@
 use crate::{
     blur_program::BlurProgram,
-    buffer::{ImageBuffer, PersistentRead, PersistentWrite, Regular, UniformBuffer},
+    buffer::{ImageBuffer, PersistentRead, PersistentWrite, UniformBuffer},
 };
 use anyhow::anyhow;
 use glfw::{
@@ -11,8 +11,7 @@ use image::codecs::{
     bmp::BmpDecoder, jpeg::JpegDecoder, png::PngDecoder, tga::TgaDecoder, tiff::TiffDecoder,
     webp::WebPDecoder,
 };
-use image::{ColorType, ExtendedColorType, ImageDecoder, ImageFormat, Limits, Rgb};
-// use rayon::Scope;
+use image::{ColorType, ExtendedColorType, ImageDecoder, ImageFormat, Limits};
 use std::{
     f32,
     fs::File,
@@ -77,12 +76,15 @@ impl Renderer {
             &kernel,
         )
         .ok_or(anyhow!("Cannot create shader program"))?;
+        program.use_();
 
         let mut image_data_buffer =
             UniformBuffer::<ImageData>::new().ok_or(anyhow!("Cannot create uniform buffer"))?;
+        image_data_buffer.bind_buffer_base(BlurProgram::IMAGE_DATA_BINDING_POINT);
+
         let mut buf1 = WorkingBuffer::new(config.working_buffer_size)
             .ok_or(anyhow!("Cannot create working buffer"))?;
-        let buf2 = WorkingBuffer::new(config.working_buffer_size)
+        let mut buf2 = WorkingBuffer::new(config.working_buffer_size)
             .ok_or(anyhow!("Cannot create working buffer"))?;
         let intermediate_buffer = ImageBuffer::new(config.working_buffer_size)
             .ok_or(anyhow!("Cannot create working buffer"))?;
@@ -90,68 +92,80 @@ impl Renderer {
         let mut render_progess = 0..0;
         let mut load_progress = 0..0;
         let loaded_images: Vec<(ImageData, usize)> = vec![];
-        let mut i = 0;
+
+        let mut switch = true;
+        let mut render_buf;
+        let mut input_buf;
+        let mut output_buf;
+
         while render_progess.start < infos.len() {
-            let render_buf = if i % 2 == 0 { &buf2 } else { &buf1 };
-            let (input_slice, output_slice) = unsafe {
-                if i % 2 == 0 {
-                    (buf1.input_buffer.data(), buf1.output_buffer.data())
-                } else {
-                    (buf2.input_buffer.data(), buf2.output_buffer.data())
+            if switch {
+                render_buf = &buf2;
+                unsafe {
+                    input_buf = buf1.input_buffer.data();
+                    output_buf = buf1.output_buffer.data();
                 }
-            };
-            let input_slice = unsafe { buf1.input_buffer.data() };
-            let output_slice = unsafe { buf1.output_buffer.data() };
+            } else {
+                render_buf = &buf1;
+                unsafe {
+                    input_buf = buf2.input_buffer.data();
+                    output_buf = buf2.output_buffer.data();
+                }
+            }
+
             thread::scope(|scope| {
                 // Start loading
                 let (advanced, handles) =
-                    Self::fill_buffer(&infos, load_progress.end, input_slice, scope);
+                    Self::fill_buffer(&infos, load_progress.end, input_buf, scope);
                 load_progress.start = render_progess.end;
                 load_progress.end = advanced;
-            });
-            for (img, i) in &loaded_images {
-                image_data_buffer.copy_update(img);
 
-                // SAFETY:
-                unsafe {
-                    render_buf.input_buffer.bind_image_texture(
-                        BlurProgram::INPUT_BINDING_UNIT,
-                        gl::READ_ONLY,
-                        gl::RGBA8,
-                    );
-                    intermediate_buffer.bind_image_texture(
-                        BlurProgram::OUTPUT_BINDING_UNIT,
-                        gl::WRITE_ONLY,
-                        gl::RGBA8,
-                    );
-                    image_data_buffer.bind_buffer_base(BlurProgram::IMAGE_DATA_BINDING_POINT);
-                    program.set_horizontal();
-                    gl::DispatchCompute(
-                        infos[*i].width.div_ceil(program.group_size().0),
-                        infos[*i].height.div_ceil(program.group_size().1),
-                        1,
-                    );
+                for (img, i) in &loaded_images {
+                    image_data_buffer.copy_update(img);
 
-                    intermediate_buffer.bind_image_texture(
-                        BlurProgram::INPUT_BINDING_UNIT,
-                        gl::READ_ONLY,
-                        gl::RGBA8,
-                    );
-                    render_buf.output_buffer.bind_image_texture(
-                        BlurProgram::OUTPUT_BINDING_UNIT,
-                        gl::WRITE_ONLY,
-                        gl::RGBA8,
-                    );
-                    program.set_vertical();
-                    gl::DispatchCompute(
-                        infos[*i].width.div_ceil(program.group_size().0),
-                        infos[*i].height.div_ceil(program.group_size().1),
-                        1,
-                    );
-                    gl::Finish();
+                    // SAFETY:
+                    unsafe {
+                        render_buf.input_buffer.bind_image_texture(
+                            BlurProgram::INPUT_BINDING_UNIT,
+                            gl::READ_ONLY,
+                            gl::RGBA8,
+                        );
+                        intermediate_buffer.bind_image_texture(
+                            BlurProgram::OUTPUT_BINDING_UNIT,
+                            gl::WRITE_ONLY,
+                            gl::RGBA8,
+                        );
+                        program.set_horizontal();
+                        gl::DispatchCompute(
+                            infos[*i].width.div_ceil(program.group_size().0),
+                            infos[*i].height.div_ceil(program.group_size().1),
+                            1,
+                        );
+
+                        intermediate_buffer.bind_image_texture(
+                            BlurProgram::INPUT_BINDING_UNIT,
+                            gl::READ_ONLY,
+                            gl::RGBA8,
+                        );
+                        render_buf.output_buffer.bind_image_texture(
+                            BlurProgram::OUTPUT_BINDING_UNIT,
+                            gl::WRITE_ONLY,
+                            gl::RGBA8,
+                        );
+                        program.set_vertical();
+                        gl::DispatchCompute(
+                            infos[*i].width.div_ceil(program.group_size().0),
+                            infos[*i].height.div_ceil(program.group_size().1),
+                            1,
+                        );
+
+                        gl::Finish();
+                    }
                 }
-            }
-            i += 1;
+            });
+
+            _ = glfw::flush_messages(&self.receiver);
+            switch = !switch;
         }
 
         Ok(())
@@ -261,7 +275,6 @@ pub struct ImageInfo<'a> {
     path: &'a str,
     width: u32,
     height: u32,
-    size: u64,
     original_color_type: ExtendedColorType,
     color_type: ColorType,
     rgba_size: usize,
@@ -288,38 +301,17 @@ impl<'a> ImageInfo<'a> {
             path,
             width: decoder.dimensions().0,
             height: decoder.dimensions().1,
-            size: decoder.total_bytes(),
             original_color_type: decoder.original_color_type(),
             rgba_size,
             color_type,
         })
     }
-
-    pub fn path(&self) -> &str {
-        self.path
-    }
-
-    pub fn width(&self) -> u32 {
-        self.width
-    }
-
-    pub fn height(&self) -> u32 {
-        self.height
-    }
-
-    pub fn original_color_type(&self) -> ExtendedColorType {
-        self.original_color_type
-    }
-
-    pub fn color_type(&self) -> ColorType {
-        self.color_type
-    }
 }
 
 pub struct Config {
-    working_buffer_size: usize,
-    group_size: (u32, u32),
-    sigma: f32,
+    pub working_buffer_size: usize,
+    pub group_size: (u32, u32),
+    pub sigma: f32,
 }
 
 struct WorkingBuffer {

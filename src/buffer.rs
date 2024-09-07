@@ -97,8 +97,8 @@ impl ImageBuffer<PersistentRead> {
 
     /// SAFETY:
     /// Caller must ensure that this buffer isn't being
-    /// rendered to while reading from it. Else the result is not
-    /// predictable
+    /// rendered to while reading from it. Otherwise the result is
+    /// unpredictable
     pub unsafe fn data(&self) -> &[u8] {
         slice::from_raw_parts(self.ptr, self.size)
     }
