@@ -114,7 +114,7 @@ impl ImageBuffer<PersistentWrite> {
     /// as it is mapped only for writing
     pub unsafe fn data(&mut self) -> &mut [u8] {
         slice::from_raw_parts_mut(self.ptr, self.size)
-    }
+    }    
 }
 
 impl<T> Drop for ImageBuffer<T> {

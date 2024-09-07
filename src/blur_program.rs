@@ -1,5 +1,5 @@
 use glfw::Version;
-use std::{ffi::CString, marker::PhantomData};
+use std::{ffi::CString, i32, marker::PhantomData};
 
 pub struct BlurProgram {
     program: u32,
@@ -9,10 +9,10 @@ pub struct BlurProgram {
 }
 
 impl BlurProgram {
-    pub const MAX_BUFFER_SIZE: usize = std::i32::MAX as usize;
+    pub const MAX_BUFFER_SIZE: usize = i32::MAX as usize;
     pub const INPUT_BINDING_UNIT: u32 = 0;
     pub const OUTPUT_BINDING_UNIT: u32 = 1;
-    pub const UNIFORM_BINDING_POINT: u32 = 2;
+    pub const IMAGE_DATA_BINDING_POINT: u32 = 2;
 
     const SRC: &'static str = r#"
 uniform ivec2 direction;
@@ -95,7 +95,7 @@ layout(std140, binding = {}) restrict readonly uniform ImageData {{
             group_size.1,
             Self::INPUT_BINDING_UNIT,
             Self::OUTPUT_BINDING_UNIT,
-            Self::UNIFORM_BINDING_POINT,
+            Self::IMAGE_DATA_BINDING_POINT,
         );
         let kernel = Self::kernel_to_glsl(kernel);
 

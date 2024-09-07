@@ -12,8 +12,13 @@ use image::codecs::{
     webp::WebPDecoder,
 };
 use image::{ColorType, ExtendedColorType, ImageDecoder, ImageFormat, Limits, Rgb};
-use rayon::Scope;
-use std::{f32, fs::File, io::BufReader};
+// use rayon::Scope;
+use std::{
+    f32,
+    fs::File,
+    io::BufReader,
+    thread::{self, Scope, ScopedJoinHandle},
+};
 
 #[derive(Debug)]
 pub struct Renderer {
@@ -34,7 +39,7 @@ impl Renderer {
 
         let mut max_texture_buffer_size = 0;
         // SAFETY:
-        // The subsequent code is valid and therefore safe
+        // The subsequent code is valid and safe
         unsafe {
             gl::GetInteger64v(gl::MAX_TEXTURE_BUFFER_SIZE, &mut max_texture_buffer_size);
         }
@@ -45,88 +50,6 @@ impl Renderer {
             receiver,
             max_image_size,
         })
-
-        // let image = image::open("sample.webp").unwrap();
-        // let image = image.as_rgb8().unwrap();
-        // let (width, height) = image.dimensions();
-        // let bytes: &[u8] = image.as_raw();
-        // // let size = bytes.len();
-        // let size = (width * height * 4) as usize;
-
-        // let decoder = get_decoder("sample.webp").unwrap();
-        // let (width, height) = decoder.dimensions();
-        // let size = decoder.total_bytes() as usize;
-        // let original_color_type = decoder.original_color_type();
-
-        // let mut input_buffer = ImageBuffer::new_writable(size)?;
-        // let intermadiate_buffer = ImageBuffer::new(size)?;
-        // let output_buffer = ImageBuffer::new_readable(size)?;
-        // let mut uniform_buffer = UniformBuffer::<ImageData>::new()?;
-        // uniform_buffer.update(ImageData {
-        //     offset: 0,
-        //     width: width as i32,
-        //     height: height as i32,
-        // });
-
-        // let kernel = gaussian_kernel(6 * sigma as usize + 1, sigma);
-        // let program = BlurProgram::new(w.get_context_version(), (16, 16), &kernel)?;
-        // program.use_();
-
-        // unsafe {
-        //     let mut i = 0;
-        //     bytes.chunks_exact(3).for_each(|pixel| {
-        //         input_buffer.data()[i..i + 3].copy_from_slice(pixel);
-        //         i += 4;
-        //     });
-        //     println!("Ready for render: {}", t.elapsed().as_millis());
-
-        //     uniform_buffer.bind_buffer_base(BlurProgram::UNIFORM_BINDING_POINT);
-
-        //     input_buffer.bind_image_texture(
-        //         BlurProgram::INPUT_BINDING_UNIT,
-        //         gl::READ_ONLY,
-        //         gl::RGBA8,
-        //     );
-        //     intermadiate_buffer.bind_image_texture(
-        //         BlurProgram::OUTPUT_BINDING_UNIT,
-        //         gl::WRITE_ONLY,
-        //         gl::RGBA8,
-        //     );
-        //     program.set_horizontal();
-        //     gl::DispatchCompute(
-        //         width.div_ceil(program.group_size().0),
-        //         height.div_ceil(program.group_size().1),
-        //         1,
-        //     );
-
-        //     intermadiate_buffer.bind_image_texture(
-        //         BlurProgram::INPUT_BINDING_UNIT,
-        //         gl::READ_ONLY,
-        //         gl::RGBA8,
-        //     );
-        //     output_buffer.bind_image_texture(
-        //         BlurProgram::OUTPUT_BINDING_UNIT,
-        //         gl::WRITE_ONLY,
-        //         gl::RGBA8,
-        //     );
-        //     program.set_vertical();
-        //     gl::DispatchCompute(
-        //         width.div_ceil(program.group_size().0),
-        //         height.div_ceil(program.group_size().1),
-        //         1,
-        //     );
-
-        //     gl::Finish();
-        //     println!("Finished: {}", t.elapsed().as_millis());
-
-        //     let image = image::RgbImage::from_fn(width, height, |x, y| {
-        //         let index = (x * 4 + y * width * 4) as usize;
-        //         let pixel = &output_buffer.data()[index..index + 3];
-        //         Rgb([pixel[0], pixel[1], pixel[2]])
-        //     });
-        //     image.save("test.webp").unwrap();
-        //     println!("Image saved: {}", t.elapsed().as_millis());
-        // }
     }
 
     pub fn max_image_size(&self) -> usize {
@@ -147,6 +70,16 @@ impl Renderer {
             }
         }
 
+        let kernel = gaussian_kernel(6 * config.sigma as usize + 1, config.sigma);
+        let program = BlurProgram::new(
+            self.window.get_context_version(),
+            config.group_size,
+            &kernel,
+        )
+        .ok_or(anyhow!("Cannot create shader program"))?;
+
+        let mut image_data_buffer =
+            UniformBuffer::<ImageData>::new().ok_or(anyhow!("Cannot create uniform buffer"))?;
         let mut buf1 = WorkingBuffer::new(config.working_buffer_size)
             .ok_or(anyhow!("Cannot create working buffer"))?;
         let buf2 = WorkingBuffer::new(config.working_buffer_size)
@@ -154,44 +87,85 @@ impl Renderer {
         let intermediate_buffer = ImageBuffer::new(config.working_buffer_size)
             .ok_or(anyhow!("Cannot create working buffer"))?;
 
-        let progess = 0..0;
-
-        let buf = unsafe { buf1.input_buffer.data() };
-
-        rayon::scope(|scope| {
-            let buf = buf;
-            scope.spawn(|scope| {
-                Self::fill_buffer(&infos, progess.end, buf, scope);
+        let mut render_progess = 0..0;
+        let mut load_progress = 0..0;
+        let loaded_images: Vec<(ImageData, usize)> = vec![];
+        let mut i = 0;
+        while render_progess.start < infos.len() {
+            let render_buf = if i % 2 == 0 { &buf2 } else { &buf1 };
+            let (input_slice, output_slice) = unsafe {
+                if i % 2 == 0 {
+                    (buf1.input_buffer.data(), buf1.output_buffer.data())
+                } else {
+                    (buf2.input_buffer.data(), buf2.output_buffer.data())
+                }
+            };
+            let input_slice = unsafe { buf1.input_buffer.data() };
+            let output_slice = unsafe { buf1.output_buffer.data() };
+            thread::scope(|scope| {
+                // Start loading
+                let (advanced, handles) =
+                    Self::fill_buffer(&infos, load_progress.end, input_slice, scope);
+                load_progress.start = render_progess.end;
+                load_progress.end = advanced;
             });
-        });
-        // rayon::scope(|scope| unsafe {
-        //     Self::fill_buffer(&infos, progess.end, buf1.input_buffer.data(), scope);
-        // });
-        // std::thread::scope(|scope| unsafe {
-        // Self::fill_buffer(&infos, progess.end, buf1.input_buffer.data(), scope);
-        // });
-        // let slice = &mut [1, 2, 3, 4, 5];
-        // slice.split_at_mut(mid)
-        // let v = vec![&mut slice[0..1], &mut slice[1..2], &mut slice[2..]];
-        // std::thread::scope(|scope| {
-        // for s in v {
-        //         scope.spawn(|| {
-        //             s[0] = 10;
-        //         });
-        //     }
-        // });
+            for (img, i) in &loaded_images {
+                image_data_buffer.copy_update(img);
+
+                // SAFETY:
+                unsafe {
+                    render_buf.input_buffer.bind_image_texture(
+                        BlurProgram::INPUT_BINDING_UNIT,
+                        gl::READ_ONLY,
+                        gl::RGBA8,
+                    );
+                    intermediate_buffer.bind_image_texture(
+                        BlurProgram::OUTPUT_BINDING_UNIT,
+                        gl::WRITE_ONLY,
+                        gl::RGBA8,
+                    );
+                    image_data_buffer.bind_buffer_base(BlurProgram::IMAGE_DATA_BINDING_POINT);
+                    program.set_horizontal();
+                    gl::DispatchCompute(
+                        infos[*i].width.div_ceil(program.group_size().0),
+                        infos[*i].height.div_ceil(program.group_size().1),
+                        1,
+                    );
+
+                    intermediate_buffer.bind_image_texture(
+                        BlurProgram::INPUT_BINDING_UNIT,
+                        gl::READ_ONLY,
+                        gl::RGBA8,
+                    );
+                    render_buf.output_buffer.bind_image_texture(
+                        BlurProgram::OUTPUT_BINDING_UNIT,
+                        gl::WRITE_ONLY,
+                        gl::RGBA8,
+                    );
+                    program.set_vertical();
+                    gl::DispatchCompute(
+                        infos[*i].width.div_ceil(program.group_size().0),
+                        infos[*i].height.div_ceil(program.group_size().1),
+                        1,
+                    );
+                    gl::Finish();
+                }
+            }
+            i += 1;
+        }
 
         Ok(())
     }
 
-    fn fill_buffer<'a>(
-        infos: &'a [ImageInfo],
+    fn fill_buffer<'env, 'scope>(
+        infos: &'env [ImageInfo],
         start: usize,
-        mut buffer: &'a mut [u8],
-        scope: &Scope<'a>,
-    ) -> usize {
+        mut buffer: &'env mut [u8],
+        scope: &'scope Scope<'scope, 'env>,
+    ) -> (usize, Vec<ScopedJoinHandle<'scope, anyhow::Result<()>>>) {
         let mut i = start;
-        let mut slices = vec![];
+        let mut handles = vec![];
+
         while i < infos.len() {
             let info = &infos[i];
             if info.rgba_size > buffer.len() {
@@ -199,37 +173,32 @@ impl Renderer {
             }
             let (occupied, free) = buffer.split_at_mut(infos[i].rgba_size);
             buffer = free;
-            slices.push(occupied);
-            // scope.spawn(move |_| {
-            //     if let Err(err) = read_image(info, occupied) {
-            //         // TODO: use logger
-            //         eprintln!("{err}");
-            //     }
-            // });
+            let handle = scope.spawn(move || Self::read_image(info, occupied));
+            handles.push(handle);
             i += 1;
         }
-        return i;
+        return (i, handles);
     }
-}
 
-fn read_image(info: &ImageInfo<'_>, occupied: &mut [u8]) -> anyhow::Result<()> {
-    match info.color_type {
-        ColorType::Rgb8 => {
-            let image = image::open(info.path)?;
-            let image = image.as_rgb8().unwrap();
-            let mut i = 0;
-            image.as_raw().chunks_exact(3).for_each(|pixel| {
-                occupied[i..i + 3].copy_from_slice(pixel);
-                i += 4;
-            });
+    fn read_image(info: &ImageInfo<'_>, occupied: &mut [u8]) -> anyhow::Result<()> {
+        match info.color_type {
+            ColorType::Rgb8 => {
+                let image = image::open(info.path)?;
+                let image = image.as_rgb8().unwrap();
+                let mut i = 0;
+                image.as_raw().chunks_exact(3).for_each(|pixel| {
+                    occupied[i..i + 3].copy_from_slice(pixel);
+                    i += 4;
+                });
+            }
+            ColorType::Rgba8 => {
+                let decoder = self::get_decoder(info.path)?;
+                decoder.read_image(occupied)?;
+            }
+            _ => return Err(anyhow!("{} has unsupported color type", info.path)),
         }
-        ColorType::Rgba8 => {
-            let decoder = get_decoder(info.path)?;
-            decoder.read_image(occupied)?;
-        }
-        _ => unreachable!(),
+        Ok(())
     }
-    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -300,7 +269,7 @@ pub struct ImageInfo<'a> {
 
 impl<'a> ImageInfo<'a> {
     pub fn new(path: &'a str, renderer: &Renderer) -> anyhow::Result<Self> {
-        let decoder = get_decoder(path)?;
+        let decoder = self::get_decoder(path)?;
         let err = format!("{path} doesn't fit into working buffer");
         let mut rgba_size: usize = decoder
             .total_bytes()
@@ -351,26 +320,6 @@ pub struct Config {
     working_buffer_size: usize,
     group_size: (u32, u32),
     sigma: f32,
-}
-
-pub enum GroupSize {
-    G2x2,
-    G4x4,
-    G8x8,
-    G16x16,
-    G32x32,
-}
-
-impl GroupSize {
-    fn group_size(&self) -> (u32, u32) {
-        match self {
-            GroupSize::G2x2 => (2, 2),
-            GroupSize::G4x4 => (4, 4),
-            GroupSize::G8x8 => (8, 8),
-            GroupSize::G16x16 => (16, 16),
-            GroupSize::G32x32 => (32, 32),
-        }
-    }
 }
 
 struct WorkingBuffer {
