@@ -2,7 +2,9 @@ mod blur;
 mod blur_program;
 mod buffer;
 
-fn main() -> anyhow::Result<()> {
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let images = &["", "", ""];
     let config = blur::Config {
         working_buffer_size: 100_000_000,
@@ -11,6 +13,6 @@ fn main() -> anyhow::Result<()> {
     };
     let renderer = blur::Renderer::new().unwrap();
     println!("{}", renderer.max_image_size());
-    renderer.process(images, &config)?;
+    renderer.process(images.into(), &config)?;
     Ok(())
 }

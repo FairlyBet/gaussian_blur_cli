@@ -2,7 +2,7 @@ use crate::{
     blur_program::BlurProgram,
     buffer::{ImageBuffer, PersistentRead, PersistentWrite, UniformBuffer},
 };
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
 use glfw::{
     fail_on_errors, ClientApiHint, GlfwReceiver, OpenGlProfileHint, PWindow, WindowEvent,
     WindowHint, WindowMode,
@@ -12,11 +12,18 @@ use image::codecs::{
     webp::WebPDecoder,
 };
 use image::{ColorType, ExtendedColorType, ImageDecoder, ImageFormat, Limits};
+use moro_local::{Scope, Spawned};
+use rayon::{
+    iter::{IndexedParallelIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 use std::{
     f32,
+    fmt::{write, Display},
     fs::File,
+    future::Future,
     io::BufReader,
-    thread::{self, Scope, ScopedJoinHandle},
+    sync::Arc,
 };
 
 #[derive(Debug)]
@@ -55,20 +62,7 @@ impl Renderer {
         self.max_image_size
     }
 
-    pub fn process(&self, images: &[&str], config: &Config) -> anyhow::Result<()> {
-        let mut infos = Vec::new();
-        for image in images {
-            match ImageInfo::new(image, self) {
-                Ok(image_info) => {
-                    infos.push(image_info);
-                }
-                Err(e) => {
-                    // log error
-                    eprintln!("{e}");
-                }
-            }
-        }
-
+    pub fn process(&self, mut images: Vec<&str>, config: &Config) -> Result<()> {
         let kernel = gaussian_kernel(6 * config.sigma as usize + 1, config.sigma);
         let program = BlurProgram::new(
             self.window.get_context_version(),
@@ -91,14 +85,16 @@ impl Renderer {
 
         let mut render_progess = 0..0;
         let mut load_progress = 0..0;
-        let loaded_images: Vec<(ImageData, usize)> = vec![];
+
+        let mut loaded_images: Vec<(ImageData, usize)> = vec![];
+        let mut rendered_images: Vec<(ImageData, usize)> = vec![];
 
         let mut switch = true;
         let mut render_buf;
         let mut input_buf;
         let mut output_buf;
 
-        while render_progess.start < infos.len() {
+        loop {
             if switch {
                 render_buf = &buf2;
                 unsafe {
@@ -113,56 +109,80 @@ impl Renderer {
                 }
             }
 
-            thread::scope(|scope| {
-                // Start loading
-                let (advanced, handles) =
-                    Self::fill_buffer(&infos, load_progress.end, input_buf, scope);
-                load_progress.start = render_progess.end;
-                load_progress.end = advanced;
-
-                for (img, i) in &loaded_images {
-                    image_data_buffer.copy_update(img);
-
-                    // SAFETY:
-                    unsafe {
-                        render_buf.input_buffer.bind_image_texture(
-                            BlurProgram::INPUT_BINDING_UNIT,
-                            gl::READ_ONLY,
-                            gl::RGBA8,
-                        );
-                        intermediate_buffer.bind_image_texture(
-                            BlurProgram::OUTPUT_BINDING_UNIT,
-                            gl::WRITE_ONLY,
-                            gl::RGBA8,
-                        );
-                        program.set_horizontal();
-                        gl::DispatchCompute(
-                            infos[*i].width.div_ceil(program.group_size().0),
-                            infos[*i].height.div_ceil(program.group_size().1),
-                            1,
-                        );
-
-                        intermediate_buffer.bind_image_texture(
-                            BlurProgram::INPUT_BINDING_UNIT,
-                            gl::READ_ONLY,
-                            gl::RGBA8,
-                        );
-                        render_buf.output_buffer.bind_image_texture(
-                            BlurProgram::OUTPUT_BINDING_UNIT,
-                            gl::WRITE_ONLY,
-                            gl::RGBA8,
-                        );
-                        program.set_vertical();
-                        gl::DispatchCompute(
-                            infos[*i].width.div_ceil(program.group_size().0),
-                            infos[*i].height.div_ceil(program.group_size().1),
-                            1,
-                        );
-
-                        gl::Finish();
+            moro_local::async_scope!(|scope| {
+                let mut handles = vec![];
+                let mut input_buf = input_buf;
+                let mut i: isize = 0;
+                while i < images.len() {
+                    let path = images[i];
+                    match self.try_load(path, input_buf, scope) {
+                        Ok((handle, info, buf)) => {
+                            input_buf = buf;
+                            handles.push(handle);
+                        }
+                        Err(err) => match err {
+                            LoadError::TooLargeImage => {
+                                // log error
+                                images.remove(i);
+                            },
+                            LoadError::NoSpaceLeft => todo!(),
+                            LoadError::DecoderError(_) => todo!(),
+                        },
                     }
+                    i += 1;
                 }
             });
+
+            // thread::scope(|scope| {
+            //     // Start loading
+            //     let (advanced, handles) =
+            //         Self::fill_buffer(&infos, load_progress.end, input_buf, scope);
+            //     load_progress.start = render_progess.end;
+            //     load_progress.end = advanced;
+
+            //     for (img, i) in &loaded_images {
+            //         image_data_buffer.copy_update(img);
+
+            //         // SAFETY:
+            //         unsafe {
+            //             render_buf.input_buffer.bind_image_texture(
+            //                 BlurProgram::INPUT_BINDING_UNIT,
+            //                 gl::READ_ONLY,
+            //                 gl::RGBA8,
+            //             );
+            //             intermediate_buffer.bind_image_texture(
+            //                 BlurProgram::OUTPUT_BINDING_UNIT,
+            //                 gl::WRITE_ONLY,
+            //                 gl::RGBA8,
+            //             );
+            //             program.set_horizontal();
+            //             gl::DispatchCompute(
+            //                 infos[*i].width.div_ceil(program.group_size().0),
+            //                 infos[*i].height.div_ceil(program.group_size().1),
+            //                 1,
+            //             );
+
+            //             intermediate_buffer.bind_image_texture(
+            //                 BlurProgram::INPUT_BINDING_UNIT,
+            //                 gl::READ_ONLY,
+            //                 gl::RGBA8,
+            //             );
+            //             render_buf.output_buffer.bind_image_texture(
+            //                 BlurProgram::OUTPUT_BINDING_UNIT,
+            //                 gl::WRITE_ONLY,
+            //                 gl::RGBA8,
+            //             );
+            //             program.set_vertical();
+            //             gl::DispatchCompute(
+            //                 infos[*i].width.div_ceil(program.group_size().0),
+            //                 infos[*i].height.div_ceil(program.group_size().1),
+            //                 1,
+            //             );
+
+            //             gl::Finish();
+            //         }
+            //     }
+            // });
 
             _ = glfw::flush_messages(&self.receiver);
             switch = !switch;
@@ -171,48 +191,113 @@ impl Renderer {
         Ok(())
     }
 
-    fn fill_buffer<'env, 'scope>(
-        infos: &'env [ImageInfo],
-        start: usize,
-        mut buffer: &'env mut [u8],
-        scope: &'scope Scope<'scope, 'env>,
-    ) -> (usize, Vec<ScopedJoinHandle<'scope, anyhow::Result<()>>>) {
-        let mut i = start;
-        let mut handles = vec![];
+    /*
+       fn fill_buffer<'env, 'scope>(
+           infos: &'env [ImageInfo],
+           start: usize,
+           mut buffer: &'env mut [u8],
+           scope: &'scope Scope<'scope, 'env>,
+       ) -> (usize, Vec<ScopedJoinHandle<'scope, anyhow::Result<()>>>) {
+           let mut i = start;
+           let mut handles = vec![];
 
-        while i < infos.len() {
-            let info = &infos[i];
-            if info.rgba_size > buffer.len() {
-                break;
-            }
-            let (occupied, free) = buffer.split_at_mut(infos[i].rgba_size);
-            buffer = free;
-            let handle = scope.spawn(move || Self::read_image(info, occupied));
-            handles.push(handle);
-            i += 1;
-        }
-        return (i, handles);
+           while i < infos.len() {
+               let info = &infos[i];
+               if info.rgba_size > buffer.len() {
+                   break;
+               }
+               let (occupied, free) = buffer.split_at_mut(infos[i].rgba_size);
+               buffer = free;
+               let handle = scope.spawn(move || Self::read_image(info, occupied));
+               handles.push(handle);
+               i += 1;
+           }
+           return (i, handles);
+       }
+    */
+
+    async fn fill() {
+        tokio_scoped::scope(|scope| {
+            // scope.spawn(future)
+        });
     }
 
-    fn read_image(info: &ImageInfo<'_>, occupied: &mut [u8]) -> anyhow::Result<()> {
-        match info.color_type {
+    fn try_load<'s, 'e>(
+        &self,
+        path: &'e str,
+        buffer: &'e mut [u8],
+        scope: &'s Scope<'s, 'e, ()>,
+    ) -> std::result::Result<
+        (
+            Spawned<impl Future<Output = Result<()>> + 's>,
+            ImageInfo,
+            &'e mut [u8],
+        ),
+        LoadError,
+    > {
+        match get_decoder(path) {
+            Ok(decoder) => {
+                let size = if decoder.color_type() == ColorType::Rgb8 {
+                    self::rgb_size_to_rgba_size(decoder.total_bytes())
+                        .ok_or(LoadError::TooLargeImage)?
+                } else {
+                    decoder.total_bytes()
+                };
+                let size: usize = size.try_into().map_err(|_| LoadError::TooLargeImage)?;
+
+                if size > self.max_image_size {
+                    return Err(LoadError::TooLargeImage);
+                }
+                if size > buffer.len() {
+                    return Err(LoadError::NoSpaceLeft);
+                }
+
+                let (occupied, left) = buffer.split_at_mut(size);
+                let image_info = ImageInfo {
+                    path: path.into(),
+                    width: decoder.dimensions().0,
+                    height: decoder.dimensions().1,
+                    original_color_type: decoder.original_color_type(),
+                    color_type: decoder.color_type(),
+                    rgba_size: size,
+                };
+
+                let handle = scope.spawn(async move { Self::read_image(decoder, occupied) });
+                Ok((handle, image_info, left))
+            }
+            Err(e) => Err(LoadError::DecoderError(e)),
+        }
+    }
+
+    fn read_image(decoder: Decoder, buffer: &mut [u8]) -> Result<()> {
+        match decoder.color_type() {
             ColorType::Rgb8 => {
-                let image = image::open(info.path)?;
-                let image = image.as_rgb8().unwrap();
-                let mut i = 0;
-                image.as_raw().chunks_exact(3).for_each(|pixel| {
-                    occupied[i..i + 3].copy_from_slice(pixel);
-                    i += 4;
-                });
+                let size = decoder.total_bytes() as usize;
+                let mut image_buf = Vec::with_capacity(size);
+                // SAFETY:
+                // This is safe as `image_buf` is created with capacity of `size`
+                unsafe { image_buf.set_len(size) }
+
+                decoder.read_image(&mut image_buf)?;
+
+                // This code copies image to GPU memory converting RGB to RGBA
+                // without setting the Alpha component so it is
+                // some random value from memory
+                buffer
+                    .par_chunks_exact_mut(4)
+                    .enumerate()
+                    .for_each(|(i, pixel)| {
+                        let pos = i * 3;
+                        pixel[0..3].copy_from_slice(&image_buf[pos..pos + 3]);
+                    });
             }
-            ColorType::Rgba8 => {
-                let decoder = self::get_decoder(info.path)?;
-                decoder.read_image(occupied)?;
-            }
-            _ => return Err(anyhow!("{} has unsupported color type", info.path)),
+            ColorType::Rgba8 => decoder.read_image(buffer)?,
+            _ => unreachable!(),
         }
         Ok(())
     }
+
+    fn save_images() {}
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -245,7 +330,7 @@ fn gaussian_kernel(size: usize, sigma: f32) -> Vec<f32> {
     kernel
 }
 
-fn get_decoder(path: &str) -> anyhow::Result<Decoder> {
+fn get_decoder(path: &str) -> Result<Decoder> {
     let format = ImageFormat::from_path(path)?;
     let file = File::open(path)?;
     let reader = BufReader::new(file);
@@ -256,56 +341,48 @@ fn get_decoder(path: &str) -> anyhow::Result<Decoder> {
         ImageFormat::Tiff => Box::new(TiffDecoder::new(reader)?),
         ImageFormat::Tga => Box::new(TgaDecoder::new(reader)?),
         ImageFormat::Bmp => Box::new(BmpDecoder::new(reader)?),
-        _ => return Err(anyhow!("Unsupported image format")),
+        _ => return Err(anyhow!("{path} has unsupported image format")),
     };
 
     match decoder.color_type() {
         ColorType::Rgb8 | ColorType::Rgba8 => Ok(decoder),
-        _ => Err(anyhow!("Unsuppoted color type")),
+        _ => Err(anyhow!("{path} has unsuppoted color type")),
     }
 }
 
-fn rgb_size_to_rgba_size(rbg_size: usize) -> Option<usize> {
+fn rgb_size_to_rgba_size(rbg_size: u64) -> Option<u64> {
     rbg_size.checked_add(rbg_size / 3)
 }
 
 pub type Decoder = Box<dyn ImageDecoder + Send + Sync>;
 
-pub struct ImageInfo<'a> {
-    path: &'a str,
+#[derive(Debug)]
+pub enum LoadError {
+    TooLargeImage,
+    NoSpaceLeft,
+    DecoderError(anyhow::Error),
+}
+
+impl Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
+            LoadError::TooLargeImage => "Image is too large",
+            LoadError::NoSpaceLeft => "No space left in buffer",
+            LoadError::DecoderError(e) => &e.to_string(),
+        };
+        write!(f, "{str}")
+    }
+}
+
+impl std::error::Error for LoadError {}
+
+pub struct ImageInfo {
+    path: String,
     width: u32,
     height: u32,
     original_color_type: ExtendedColorType,
     color_type: ColorType,
     rgba_size: usize,
-}
-
-impl<'a> ImageInfo<'a> {
-    pub fn new(path: &'a str, renderer: &Renderer) -> anyhow::Result<Self> {
-        let decoder = self::get_decoder(path)?;
-        let err = format!("{path} doesn't fit into working buffer");
-        let mut rgba_size: usize = decoder
-            .total_bytes()
-            .try_into()
-            .map_err(|_| anyhow!(err.clone()))?;
-        let color_type = decoder.color_type();
-        if color_type == ColorType::Rgb8 {
-            rgba_size = rgb_size_to_rgba_size(rgba_size).ok_or(anyhow!(err.clone()))?;
-        }
-
-        if rgba_size > renderer.max_image_size {
-            return Err(anyhow!(err));
-        }
-
-        Ok(Self {
-            path,
-            width: decoder.dimensions().0,
-            height: decoder.dimensions().1,
-            original_color_type: decoder.original_color_type(),
-            rgba_size,
-            color_type,
-        })
-    }
 }
 
 pub struct Config {
