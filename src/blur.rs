@@ -12,13 +12,11 @@ use image::codecs::{
     webp::WebPDecoder,
 };
 use image::{ColorType, ExtendedColorType, ImageDecoder, ImageFormat, Limits};
-use moro_local::{Scope, Spawned};
 use rayon::{
-    iter::{IndexedParallelIterator, ParallelIterator},
+    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
-use std::{f32, fmt::Display, fs::File, future::Future, io::BufReader, result, sync::Arc};
-use tokio::task;
+use std::{f32, fmt::Display, fs::File, io::BufReader, rc::Rc, result, sync::Arc};
 
 #[derive(Debug)]
 pub struct Renderer {
@@ -77,90 +75,103 @@ impl Renderer {
         let output_buffer = ImageBuffer::new_readable(config.working_buffer_size)
             .ok_or(anyhow!("Cannot create working buffer"))?;
 
-        let mut input_slice = unsafe { input_buffer.data() };
         while !images.is_empty() {
-            let mut i = 0;
-            while i < images.len() {
-                // let path = images[i].;
+            let input_slice = unsafe { input_buffer.data() };
+            let mut loaded_images = self.load_images(&mut images, input_slice);
 
-                match self.try_load("path".to_string(), input_slice) {
-                    Ok(info) => {
-                        input_slice = input_slice.split_at_mut(info.rgba_size).1;
-                        // loaded_images.push(info);
-                        // handles.push(future);
-                        i += 1;
-                    }
-                    Err(err) => match err {
-                        LoadError::TooLargeImage => {
-                            
-                        }
-                        LoadError::DecoderError(_) => {}
-                        _ => {}
-                    },
+            for (img, offset) in &loaded_images {
+                image_data_buffer.update(ImageData {
+                    offset: *offset as i32,
+                    width: img.width as i32,
+                    height: img.height as i32,
+                });
+
+                // SAFETY:
+                unsafe {
+                    input_buffer.bind_image_texture(
+                        BlurProgram::INPUT_BINDING_UNIT,
+                        gl::READ_ONLY,
+                        gl::RGBA8,
+                    );
+                    intermediate_buffer.bind_image_texture(
+                        BlurProgram::OUTPUT_BINDING_UNIT,
+                        gl::WRITE_ONLY,
+                        gl::RGBA8,
+                    );
+                    program.set_horizontal();
+                    gl::DispatchCompute(
+                        img.width.div_ceil(program.group_size().0),
+                        img.height.div_ceil(program.group_size().1),
+                        1,
+                    );
+
+                    intermediate_buffer.bind_image_texture(
+                        BlurProgram::INPUT_BINDING_UNIT,
+                        gl::READ_ONLY,
+                        gl::RGBA8,
+                    );
+                    output_buffer.bind_image_texture(
+                        BlurProgram::OUTPUT_BINDING_UNIT,
+                        gl::WRITE_ONLY,
+                        gl::RGBA8,
+                    );
+                    program.set_vertical();
+                    gl::DispatchCompute(
+                        img.width.div_ceil(program.group_size().0),
+                        img.height.div_ceil(program.group_size().1),
+                        1,
+                    );
                 }
             }
+            unsafe {
+                gl::Finish();
+            }
 
-            /*
-                       // thread::scope(|scope| {
-                       //     // Start loading
-                       //     let (advanced, handles) =
-                       //         Self::fill_buffer(&infos, load_progress.end, input_buf, scope);
-                       //     load_progress.start = render_progess.end;
-                       //     load_progress.end = advanced;
-
-                       //     for (img, i) in &loaded_images {
-                       //         image_data_buffer.copy_update(img);
-
-                       //         // SAFETY:
-                       //         unsafe {
-                       //             render_buf.input_buffer.bind_image_texture(
-                       //                 BlurProgram::INPUT_BINDING_UNIT,
-                       //                 gl::READ_ONLY,
-                       //                 gl::RGBA8,
-                       //             );
-                       //             intermediate_buffer.bind_image_texture(
-                       //                 BlurProgram::OUTPUT_BINDING_UNIT,
-                       //                 gl::WRITE_ONLY,
-                       //                 gl::RGBA8,
-                       //             );
-                       //             program.set_horizontal();
-                       //             gl::DispatchCompute(
-                       //                 infos[*i].width.div_ceil(program.group_size().0),
-                       //                 infos[*i].height.div_ceil(program.group_size().1),
-                       //                 1,
-                       //             );
-
-                       //             intermediate_buffer.bind_image_texture(
-                       //                 BlurProgram::INPUT_BINDING_UNIT,
-                       //                 gl::READ_ONLY,
-                       //                 gl::RGBA8,
-                       //             );
-                       //             render_buf.output_buffer.bind_image_texture(
-                       //                 BlurProgram::OUTPUT_BINDING_UNIT,
-                       //                 gl::WRITE_ONLY,
-                       //                 gl::RGBA8,
-                       //             );
-                       //             program.set_vertical();
-                       //             gl::DispatchCompute(
-                       //                 infos[*i].width.div_ceil(program.group_size().0),
-                       //                 infos[*i].height.div_ceil(program.group_size().1),
-                       //                 1,
-                       //             );
-
-                       //             gl::Finish();
-                       //         }
-                       //     }
-                       // });
-            */
             _ = glfw::flush_messages(&self.receiver);
         }
 
         Ok(())
     }
 
+    fn load_images(
+        &self,
+        images: &mut Vec<Arc<str>>,
+        mut input_slice: &mut [u8],
+    ) -> Vec<(ImageInfo, usize)> {
+        let mut loaded_images = vec![];
+        let mut i = 0;
+        let mut offset = 0;
+        while i < images.len() {
+            let path = images[i].clone();
+            match self.try_load(path.clone(), input_slice) {
+                Ok(info) => {
+                    input_slice = input_slice.split_at_mut(info.rgba_size).1;
+                    let size = info.rgba_size;
+                    loaded_images.push((info, offset));
+                    offset += size;
+                    _ = images.remove(i);
+                }
+                Err(err) => match err {
+                    LoadError::TooLargeImage => {
+                        // replace with log
+                        eprintln!("{} does not fit into working buffer", path);
+                        _ = images.remove(i);
+                    }
+                    LoadError::DecoderError(e) => {
+                        // replace with log
+                        eprintln!("{e}");
+                        _ = images.remove(i);
+                    }
+                    LoadError::NoSpaceLeft => i += 1,
+                },
+            }
+        }
+        loaded_images
+    }
+
     fn try_load<'a>(
         &self,
-        path: String,
+        path: Arc<str>,
         buffer: &'a mut [u8],
     ) -> result::Result<ImageInfo, LoadError> {
         match get_decoder(&path) {
@@ -191,7 +202,7 @@ impl Renderer {
                 if let Err(e) = Self::read_image(decoder, buffer) {
                     return Err(LoadError::DecoderError(e));
                 }
-                Ok((image_info))
+                Ok(image_info)
             }
             Err(e) => Err(LoadError::DecoderError(e)),
         }
@@ -225,7 +236,11 @@ impl Renderer {
         Ok(())
     }
 
-    fn save_images() {}
+    fn save_images(buffer: &[u8], infos: &[(ImageInfo, usize)]) {
+        infos.par_iter().for_each(|(info, offset)| {
+            // image::save_buffer(path, buffer[offset..info.rgba_size], width, height, color)
+        });
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -305,7 +320,7 @@ impl Display for LoadError {
 impl std::error::Error for LoadError {}
 
 pub struct ImageInfo {
-    path: String,
+    path: Arc<str>,
     width: u32,
     height: u32,
     original_color_type: ExtendedColorType,
