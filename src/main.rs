@@ -2,10 +2,9 @@ mod blur;
 mod blur_program;
 mod buffer;
 
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let images = &["", "", ""];
+    let images: Vec<std::sync::Arc<str>> = vec!["".into(), "".into(), "".into()];
     let config = blur::Config {
         working_buffer_size: 100_000_000,
         group_size: (2, 2),
