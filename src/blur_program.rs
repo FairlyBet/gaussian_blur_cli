@@ -94,7 +94,7 @@ void main() {
 layout(local_size_x = {}, local_size_y = {}) in;
 layout(binding = {}, rgba8) restrict readonly uniform imageBuffer input_image;
 layout(binding = {}, rgba8) restrict writeonly uniform imageBuffer output_image;
-layout(std140, binding = {}) restrict readonly uniform ImageData {{
+layout(std140, binding = {}) uniform ImageData {{
     int offset;
     int width;
     int height;
@@ -182,6 +182,19 @@ impl ComputeShader {
             let mut is_compiled = 0;
             gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut is_compiled);
             if is_compiled == gl::FALSE as i32 {
+                let mut len = 0;
+                gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len);
+                let mut v: Vec<u8> = Vec::with_capacity(len.try_into().unwrap());
+                let mut len_written = 0;
+                gl::GetShaderInfoLog(
+                    shader,
+                    v.capacity().try_into().unwrap(),
+                    &mut len_written,
+                    v.as_mut_ptr().cast(),
+                );
+                v.set_len(len_written.try_into().unwrap());
+
+                println!("{}", String::from_utf8_lossy(&v).into_owned());
                 return None;
             }
 

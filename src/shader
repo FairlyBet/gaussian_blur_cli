@@ -3,15 +3,18 @@
 layout(local_size_x = 2, local_size_y = 2) in;
 layout(binding = 0, rgba8) restrict readonly uniform imageBuffer input_image;
 layout(binding = 1, rgba8) restrict writeonly uniform imageBuffer output_image;
-layout(std140, binding = 2) restrict readonly uniform ImageData {
+layout(std140, binding = 2) readonly uniform ImageData {
     int offset;
     int width;
     int height;
 };
 const int KERNEL_SIZE = 25;
-const float[KERNEL_SIZE] KERNEL = float[KERNEL_SIZE](0.0011098814, 0.002277329, 0.0043896665, 0.00794866, 0.013521125, 
-0.021606697, 0.03243549, 0.045741376, 0.06059748, 0.075414784, 0.08816881, 0.09683449, 0.09990835, 0.09683449, 0.08816881, 0.075414784, 0.06059748, 0.045741376, 0.03243549, 0.021606697, 0.013521125, 0.00794866, 0.0043896665, 0.002277329, 
-0.0011098814);
+const float[KERNEL_SIZE] KERNEL = float[KERNEL_SIZE](
+0.0011098814, 0.002277329, 0.0043896665, 0.00794866, 0.013521125, 
+0.021606697, 0.03243549, 0.045741376, 0.06059748, 0.075414784, 
+0.08816881, 0.09683449, 0.09990835, 0.09683449, 0.08816881, 
+0.075414784, 0.06059748, 0.045741376, 0.03243549, 0.021606697, 
+0.013521125, 0.00794866, 0.0043896665, 0.002277329, 0.0011098814);
 
 uniform ivec2 direction;
 

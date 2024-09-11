@@ -22,7 +22,8 @@ use rayon::{
 use std::{
     error::Error,
     f32,
-    fmt::Display,
+    ffi::OsStr,
+    fmt::{Display, Formatter},
     fs::File,
     io::BufReader,
     path::{Path, PathBuf},
@@ -69,7 +70,7 @@ impl Renderer {
         self.max_image_size
     }
 
-    pub fn process(&self, mut images: Vec<Arc<str>>, config: &Config) -> Result<()> {
+    pub fn process(&self, mut images: Vec<Arc<Path>>, config: &Config) -> Result<()> {
         let kernel = gaussian_kernel(config.sigma);
         let program = BlurProgram::new(
             self.window.get_context_version(),
@@ -104,6 +105,7 @@ impl Renderer {
                 });
 
                 // SAFETY:
+                //
                 unsafe {
                     input_buffer.bind_image_texture(
                         BlurProgram::INPUT_BINDING_UNIT,
@@ -140,18 +142,19 @@ impl Renderer {
                     );
                 }
             }
+
+            // SAFETY:
+            // This is just safe :)
             unsafe {
-                let t = std::time::Instant::now();
                 gl::Finish();
-                println!("Finished: {}", t.elapsed().as_millis());
             }
-            let t = std::time::Instant::now();
+
             Self::save_images(
                 unsafe { output_buffer.data() },
                 &loaded_images,
                 &config.output_dir,
             );
-            println!("Saved: {}", t.elapsed().as_millis());
+
             _ = glfw::flush_messages(&self.receiver);
         }
 
@@ -160,7 +163,7 @@ impl Renderer {
 
     fn load_images(
         &self,
-        images: &mut Vec<Arc<str>>,
+        images: &mut Vec<Arc<Path>>,
         mut input_slice: &mut [u8],
     ) -> Vec<(ImageInfo, usize)> {
         let mut loaded_images = vec![];
@@ -179,7 +182,7 @@ impl Renderer {
                 Err(err) => match err {
                     LoadError::TooLargeImage => {
                         // replace with log
-                        eprintln!("{} does not fit into working buffer", path);
+                        eprintln!("{path:#?} does not fit into working buffer");
                         _ = images.remove(i);
                     }
                     LoadError::DecoderError(e) => {
@@ -194,7 +197,7 @@ impl Renderer {
         loaded_images
     }
 
-    fn try_load(&self, path: Arc<str>, buffer: &mut [u8]) -> result::Result<ImageInfo, LoadError> {
+    fn try_load(&self, path: Arc<Path>, buffer: &mut [u8]) -> result::Result<ImageInfo, LoadError> {
         match get_decoder(&path) {
             Ok(decoder) => {
                 let size = if decoder.color_type() == ColorType::Rgb8 {
@@ -258,8 +261,7 @@ impl Renderer {
 
     fn save_images(buffer: &[u8], infos: &[(ImageInfo, usize)], output_dir: &Path) {
         for (info, offset) in infos {
-            // Replace with `filename()`
-            let filename = sanitize_filename::sanitize(&*info.path);
+            let filename = info.path.file_name().unwrap_or(OsStr::new("None"));
             let mut path = output_dir.to_path_buf();
             path.push(filename);
             match info.color_type {
@@ -300,7 +302,7 @@ pub enum LoadError {
 }
 
 impl Display for LoadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let str = match self {
             LoadError::TooLargeImage => "Image is too large",
             LoadError::NoSpaceLeft => "No space left in buffer",
@@ -337,7 +339,7 @@ fn rgb_size_to_rgba_size(rbg_size: u64) -> Option<u64> {
     rbg_size.checked_add(rbg_size / 3)
 }
 
-fn get_decoder(path: &str) -> Result<Decoder> {
+fn get_decoder(path: &Path) -> Result<Decoder> {
     let format = ImageFormat::from_path(path)?;
     let file = File::open(path)?;
     let reader = BufReader::new(file);
@@ -348,12 +350,12 @@ fn get_decoder(path: &str) -> Result<Decoder> {
         ImageFormat::Tiff => Box::new(TiffDecoder::new(reader)?),
         ImageFormat::Tga => Box::new(TgaDecoder::new(reader)?),
         ImageFormat::Bmp => Box::new(BmpDecoder::new(reader)?),
-        _ => return Err(anyhow!("{path} has unsupported image format")),
+        _ => return Err(anyhow!("{path:#?} has unsupported image format")),
     };
 
     match decoder.color_type() {
         ColorType::Rgb8 | ColorType::Rgba8 => Ok(decoder),
-        _ => Err(anyhow!("{path} has unsupported color type")),
+        _ => Err(anyhow!("{path:#?} has unsupported color type")),
     }
 }
 
@@ -361,8 +363,7 @@ pub type Decoder = Box<dyn ImageDecoder + Send + Sync>;
 
 #[derive(Debug)]
 pub struct ImageInfo {
-    // Replace with `Arc<Path>`
-    path: Arc<str>,
+    path: Arc<Path>,
     width: u32,
     height: u32,
     color_type: ColorType,
@@ -371,12 +372,8 @@ pub struct ImageInfo {
 
 #[derive(Debug, Parser)]
 pub struct Config {
-    #[arg(short)]
     pub working_buffer_size: usize,
-    #[arg(short)]
     pub group_size: u32,
-    #[arg(short)]
     pub sigma: f32,
-    #[arg(short)]
     pub output_dir: PathBuf,
 }
