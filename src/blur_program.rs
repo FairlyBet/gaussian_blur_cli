@@ -1,6 +1,14 @@
 use glfw::Version;
 use std::{ffi::CString, i32, marker::PhantomData};
 
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct ImageData {
+    pub offset: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
 pub struct BlurProgram {
     program: u32,
     direction_location: i32,
@@ -13,40 +21,6 @@ impl BlurProgram {
     pub const INPUT_BINDING_UNIT: u32 = 0;
     pub const OUTPUT_BINDING_UNIT: u32 = 1;
     pub const IMAGE_DATA_BINDING_POINT: u32 = 2;
-
-    const SRC: &'static str = r#"
-uniform ivec2 direction;
-
-vec4 fetch_pixel(ivec2 pos) {
-    int x = pos.x;
-    int y = pos.y * width;
-    return imageLoad(input_image, x + y);
-}
-
-void write_pixel(ivec2 pos, vec4 pixel) {
-    int x = pos.x;
-    int y = pos.y * width;
-    imageStore(output_image, x + y, pixel);
-}
-
-void main() {
-    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
-
-    if (pos.x >= width || pos.y >= height) return;
-
-    vec4 sum = vec4(0.0);
-    for (int i = 0; i < KERNEL_SIZE; ++i)
-    {
-    	ivec2 npos = pos + direction * (i - KERNEL_SIZE / 2);
-    	if (npos.x < 0) npos.x = 0;
-    	if (npos.y < 0) npos.y = 0;
-    	if (npos.x >= width) npos.x = width - 1;
-    	if (npos.y >= height) npos.y = height - 1;
-    	sum += KERNEL[i] * fetch_pixel(npos);
-    }
-    write_pixel(pos, sum);
-}
-"#;
 
     pub fn new(context_version: Version, group_size: (u32, u32), kernel: &[f32]) -> Option<Self> {
         let src = Self::src(context_version, group_size, kernel);
@@ -76,6 +50,40 @@ void main() {
     }
 
     pub fn src(context_version: Version, group_size: (u32, u32), kernel: &[f32]) -> String {
+        const SRC: &str = r#"
+uniform ivec2 direction;
+
+vec4 fetch_pixel(ivec2 pos) {
+    int x = pos.x;
+    int y = pos.y * width;
+    return imageLoad(input_image, offset + x + y);
+}
+
+void write_pixel(ivec2 pos, vec4 pixel) {
+    int x = pos.x;
+    int y = pos.y * width;
+    imageStore(output_image, offset + x + y, pixel);
+}
+
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+
+    if (pos.x >= width || pos.y >= height) return;
+
+    vec4 sum = vec4(0.0);
+    for (int i = 0; i < KERNEL_SIZE; ++i)
+    {
+    	ivec2 npos = pos + direction * (i - KERNEL_SIZE / 2);
+    	if (npos.x < 0) npos.x = 0;
+    	if (npos.y < 0) npos.y = 0;
+    	if (npos.x >= width) npos.x = width - 1;
+    	if (npos.y >= height) npos.y = height - 1;
+    	sum += KERNEL[i] * fetch_pixel(npos);
+    }
+    write_pixel(pos, sum);
+}
+"#;
+
         let version = format!(
             "#version {}{}{} core\n",
             context_version.major, context_version.minor, context_version.patch
@@ -99,7 +107,7 @@ layout(std140, binding = {}) restrict readonly uniform ImageData {{
         );
         let kernel = Self::kernel_to_glsl(kernel);
 
-        version + &layout_data + &kernel + Self::SRC
+        version + &layout_data + &kernel + SRC
     }
 
     fn kernel_to_glsl(kernel: &[f32]) -> String {

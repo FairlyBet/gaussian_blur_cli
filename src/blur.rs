@@ -1,22 +1,35 @@
 use crate::{
-    blur_program::BlurProgram,
-    buffer::{ImageBuffer, PersistentRead, PersistentWrite, UniformBuffer},
+    blur_program::{BlurProgram, ImageData},
+    buffer::{ImageBuffer, UniformBuffer},
 };
 use anyhow::{anyhow, Result};
 use glfw::{
     fail_on_errors, ClientApiHint, GlfwReceiver, OpenGlProfileHint, PWindow, WindowEvent,
     WindowHint, WindowMode,
 };
-use image::codecs::{
-    bmp::BmpDecoder, jpeg::JpegDecoder, png::PngDecoder, tga::TgaDecoder, tiff::TiffDecoder,
-    webp::WebPDecoder,
+use image::{
+    codecs::{
+        bmp::BmpDecoder, jpeg::JpegDecoder, png::PngDecoder, tga::TgaDecoder, tiff::TiffDecoder,
+        webp::WebPDecoder,
+    },
+    ColorType, ImageDecoder, ImageFormat, Limits, Rgb, RgbImage, Rgba, RgbaImage,
 };
-use image::{ColorType, ExtendedColorType, ImageDecoder, ImageFormat, Limits};
 use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
-    slice::ParallelSliceMut,
+    iter::{IndexedParallelIterator as _, ParallelIterator as _},
+    slice::ParallelSliceMut as _,
 };
-use std::{f32, fmt::Display, fs::File, io::BufReader, rc::Rc, result, sync::Arc};
+use std::{
+    f32,
+    fmt::Display,
+    fs::File,
+    io::BufReader,
+    path::{Path, PathBuf},
+    result,
+    sync::Arc,
+};
+
+const RGB_LEN: usize = 3;
+const RGBA_LEN: usize = 4;
 
 #[derive(Debug)]
 pub struct Renderer {
@@ -55,7 +68,7 @@ impl Renderer {
     }
 
     pub fn process(&self, mut images: Vec<Arc<str>>, config: &Config) -> Result<()> {
-        let kernel = gaussian_kernel(6 * config.sigma as usize + 1, config.sigma);
+        let kernel = gaussian_kernel(config.sigma);
         let program = BlurProgram::new(
             self.window.get_context_version(),
             config.group_size,
@@ -76,12 +89,16 @@ impl Renderer {
             .ok_or(anyhow!("Cannot create working buffer"))?;
 
         while !images.is_empty() {
+            // SAFETY:
+            //
             let input_slice = unsafe { input_buffer.data() };
-            let mut loaded_images = self.load_images(&mut images, input_slice);
+            let t = std::time::Instant::now();
+            let loaded_images = self.load_images(&mut images, input_slice);
+            println!("Loaded: {}", t.elapsed().as_millis());
 
             for (img, offset) in &loaded_images {
                 image_data_buffer.update(ImageData {
-                    offset: *offset as i32,
+                    offset: (*offset / RGBA_LEN) as i32,
                     width: img.width as i32,
                     height: img.height as i32,
                 });
@@ -124,9 +141,17 @@ impl Renderer {
                 }
             }
             unsafe {
+                let t = std::time::Instant::now();
                 gl::Finish();
+                println!("Finished: {}", t.elapsed().as_millis());
             }
-
+            let t = std::time::Instant::now();
+            Self::save_images(
+                unsafe { output_buffer.data() },
+                &loaded_images,
+                &config.output_dir,
+            );
+            println!("Saved: {}", t.elapsed().as_millis());
             _ = glfw::flush_messages(&self.receiver);
         }
 
@@ -194,12 +219,11 @@ impl Renderer {
                     path,
                     width: decoder.dimensions().0,
                     height: decoder.dimensions().1,
-                    original_color_type: decoder.original_color_type(),
                     color_type: decoder.color_type(),
                     rgba_size: size,
                 };
 
-                if let Err(e) = Self::read_image(decoder, buffer) {
+                if let Err(e) = Self::read_image(decoder, &mut buffer[..size]) {
                     return Err(LoadError::DecoderError(e));
                 }
                 Ok(image_info)
@@ -223,11 +247,11 @@ impl Renderer {
                 // without setting the Alpha component so it is
                 // some random value from memory
                 buffer
-                    .par_chunks_exact_mut(4)
+                    .par_chunks_exact_mut(RGBA_LEN as usize)
                     .enumerate()
                     .for_each(|(i, pixel)| {
-                        let pos = i * 3;
-                        pixel[0..3].copy_from_slice(&image_buf[pos..pos + 3]);
+                        let pos = i * RGB_LEN;
+                        pixel[..RGB_LEN].copy_from_slice(&image_buf[pos..pos + RGB_LEN]);
                     });
             }
             ColorType::Rgba8 => decoder.read_image(buffer)?,
@@ -236,68 +260,40 @@ impl Renderer {
         Ok(())
     }
 
-    fn save_images(buffer: &[u8], infos: &[(ImageInfo, usize)]) {
-        infos.par_iter().for_each(|(info, offset)| {
-            // image::save_buffer(path, buffer[offset..info.rgba_size], width, height, color)
-        });
+    fn save_images(buffer: &[u8], infos: &[(ImageInfo, usize)], output_dir: &Path) {
+        for (info, offset) in infos {
+            let filename = sanitize_filename::sanitize(&*info.path);
+            let mut path = output_dir.to_path_buf();
+            path.push(filename);
+            match info.color_type {
+                ColorType::Rgb8 => {
+                    let img = RgbImage::from_par_fn(info.width, info.height, |x, y| {
+                        let pos = offset + (x + y * info.width) as usize * RGBA_LEN;
+                        Rgb([buffer[pos], buffer[pos + 1], buffer[pos + 2]])
+                    });
+                    if let Err(e) = img.save(&path) {
+                        eprintln!("{e}");
+                    }
+                }
+                ColorType::Rgba8 => {
+                    let img = RgbaImage::from_par_fn(info.width, info.height, |x, y| {
+                        let pos = offset + (x + y * info.width) as usize * RGBA_LEN;
+                        Rgba([
+                            buffer[pos],
+                            buffer[pos + 1],
+                            buffer[pos + 2],
+                            buffer[pos + 3],
+                        ])
+                    });
+                    if let Err(e) = img.save(&path) {
+                        eprintln!("{e}");
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
     }
 }
-
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-struct ImageData {
-    offset: i32,
-    width: i32,
-    height: i32,
-}
-
-fn gaussian_kernel(size: usize, sigma: f32) -> Vec<f32> {
-    assert!(size % 2 == 1, "Size of the kernel should be odd.");
-
-    let mut kernel = Vec::with_capacity(size);
-    let half_size = (size / 2) as isize;
-    let sigma2 = sigma * sigma;
-    let normalization_factor = 1.0 / (2.0 * f32::consts::PI * sigma2).sqrt();
-    let mut sum = 0.0;
-
-    for i in -half_size..=half_size {
-        let value = normalization_factor * (-((i * i) as f32) / (2.0 * sigma2)).exp();
-        kernel.push(value);
-        sum += value;
-    }
-
-    (0..size).for_each(|i| {
-        kernel[i] /= sum;
-    });
-
-    kernel
-}
-
-fn get_decoder(path: &str) -> Result<Decoder> {
-    let format = ImageFormat::from_path(path)?;
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let decoder: Box<dyn ImageDecoder + Send + Sync> = match format {
-        ImageFormat::Png => Box::new(PngDecoder::with_limits(reader, Limits::default())?),
-        ImageFormat::Jpeg => Box::new(JpegDecoder::new(reader)?),
-        ImageFormat::WebP => Box::new(WebPDecoder::new(reader)?),
-        ImageFormat::Tiff => Box::new(TiffDecoder::new(reader)?),
-        ImageFormat::Tga => Box::new(TgaDecoder::new(reader)?),
-        ImageFormat::Bmp => Box::new(BmpDecoder::new(reader)?),
-        _ => return Err(anyhow!("{path} has unsupported image format")),
-    };
-
-    match decoder.color_type() {
-        ColorType::Rgb8 | ColorType::Rgba8 => Ok(decoder),
-        _ => Err(anyhow!("{path} has unsuppoted color type")),
-    }
-}
-
-fn rgb_size_to_rgba_size(rbg_size: u64) -> Option<u64> {
-    rbg_size.checked_add(rbg_size / 3)
-}
-
-pub type Decoder = Box<dyn ImageDecoder + Send + Sync>;
 
 #[derive(Debug)]
 pub enum LoadError {
@@ -319,33 +315,67 @@ impl Display for LoadError {
 
 impl std::error::Error for LoadError {}
 
+fn gaussian_kernel(sigma: f32) -> Vec<f32> {
+    let size = 6 * sigma as usize + 1;
+    let mut kernel = Vec::with_capacity(size);
+    let half_size = (size / 2) as isize;
+    let sigma2 = sigma * sigma;
+    let normalization_factor = 1.0 / (2.0 * f32::consts::PI * sigma2).sqrt();
+    let mut sum = 0.0;
+
+    for i in -half_size..=half_size {
+        let value = normalization_factor * (-((i * i) as f32) / (2.0 * sigma2)).exp();
+        kernel.push(value);
+        sum += value;
+    }
+
+    (0..size).for_each(|i| {
+        kernel[i] /= sum;
+    });
+
+    kernel
+}
+
+fn rgb_size_to_rgba_size(rbg_size: u64) -> Option<u64> {
+    rbg_size.checked_add(rbg_size / 3)
+}
+
+fn get_decoder(path: &str) -> Result<Decoder> {
+    let format = ImageFormat::from_path(path)?;
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let decoder: Decoder = match format {
+        ImageFormat::Png => Box::new(PngDecoder::with_limits(reader, Limits::default())?),
+        ImageFormat::Jpeg => Box::new(JpegDecoder::new(reader)?),
+        ImageFormat::WebP => Box::new(WebPDecoder::new(reader)?),
+        ImageFormat::Tiff => Box::new(TiffDecoder::new(reader)?),
+        ImageFormat::Tga => Box::new(TgaDecoder::new(reader)?),
+        ImageFormat::Bmp => Box::new(BmpDecoder::new(reader)?),
+        _ => return Err(anyhow!("{path} has unsupported image format")),
+    };
+
+    match decoder.color_type() {
+        ColorType::Rgb8 | ColorType::Rgba8 => Ok(decoder),
+        _ => Err(anyhow!("{path} has unsuppoted color type")),
+    }
+}
+
+pub type Decoder = Box<dyn ImageDecoder + Send + Sync>;
+
+#[derive(Debug)]
 pub struct ImageInfo {
     path: Arc<str>,
     width: u32,
     height: u32,
-    original_color_type: ExtendedColorType,
     color_type: ColorType,
     rgba_size: usize,
+    // original_color_type: ExtendedColorType,
 }
 
+#[derive(Debug)]
 pub struct Config {
     pub working_buffer_size: usize,
     pub group_size: (u32, u32),
     pub sigma: f32,
-}
-
-struct WorkingBuffer {
-    input_buffer: ImageBuffer<PersistentWrite>,
-    output_buffer: ImageBuffer<PersistentRead>,
-}
-
-impl WorkingBuffer {
-    fn new(size: usize) -> Option<Self> {
-        let input_buffer = ImageBuffer::new_writable(size)?;
-        let output_buffer = ImageBuffer::new_readable(size)?;
-        Some(Self {
-            input_buffer,
-            output_buffer,
-        })
-    }
+    pub output_dir: PathBuf,
 }

@@ -9,6 +9,4 @@ glfw = "0.58.0"
 anyhow = "1.0.87"
 image = "0.25.2"
 rayon = "1.10.0"
-tokio = { version = "1.40.0", features = ["rt-multi-thread", "macros"] }
-tokio-scoped = "0.2.0"
-moro-local = "0.4.0"
+sanitize-filename = "0.5.0"
