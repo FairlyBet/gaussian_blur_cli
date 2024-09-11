@@ -3,6 +3,7 @@ use crate::{
     buffer::{ImageBuffer, UniformBuffer},
 };
 use anyhow::{anyhow, Result};
+use clap::Parser;
 use glfw::{
     fail_on_errors, ClientApiHint, GlfwReceiver, OpenGlProfileHint, PWindow, WindowEvent,
     WindowHint, WindowMode,
@@ -19,6 +20,7 @@ use rayon::{
     slice::ParallelSliceMut as _,
 };
 use std::{
+    error::Error,
     f32,
     fmt::Display,
     fs::File,
@@ -28,8 +30,8 @@ use std::{
     sync::Arc,
 };
 
-const RGB_LEN: usize = 3;
-const RGBA_LEN: usize = 4;
+const RGB_SIZE: usize = 3;
+const RGBA_SIZE: usize = 4;
 
 #[derive(Debug)]
 pub struct Renderer {
@@ -71,7 +73,7 @@ impl Renderer {
         let kernel = gaussian_kernel(config.sigma);
         let program = BlurProgram::new(
             self.window.get_context_version(),
-            config.group_size,
+            (config.group_size, config.group_size),
             &kernel,
         )
         .ok_or(anyhow!("Cannot create shader program"))?;
@@ -90,15 +92,13 @@ impl Renderer {
 
         while !images.is_empty() {
             // SAFETY:
-            //
+            // It is safe because buffer usage is only writing
+            // and it is not being used by GPU at this moment
             let input_slice = unsafe { input_buffer.data() };
-            let t = std::time::Instant::now();
             let loaded_images = self.load_images(&mut images, input_slice);
-            println!("Loaded: {}", t.elapsed().as_millis());
-
             for (img, offset) in &loaded_images {
                 image_data_buffer.update(ImageData {
-                    offset: (*offset / RGBA_LEN) as i32,
+                    offset: (*offset / RGBA_SIZE) as i32,
                     width: img.width as i32,
                     height: img.height as i32,
                 });
@@ -164,8 +164,8 @@ impl Renderer {
         mut input_slice: &mut [u8],
     ) -> Vec<(ImageInfo, usize)> {
         let mut loaded_images = vec![];
-        let mut i = 0;
         let mut offset = 0;
+        let mut i = 0;
         while i < images.len() {
             let path = images[i].clone();
             match self.try_load(path.clone(), input_slice) {
@@ -194,11 +194,7 @@ impl Renderer {
         loaded_images
     }
 
-    fn try_load<'a>(
-        &self,
-        path: Arc<str>,
-        buffer: &'a mut [u8],
-    ) -> result::Result<ImageInfo, LoadError> {
+    fn try_load(&self, path: Arc<str>, buffer: &mut [u8]) -> result::Result<ImageInfo, LoadError> {
         match get_decoder(&path) {
             Ok(decoder) => {
                 let size = if decoder.color_type() == ColorType::Rgb8 {
@@ -244,14 +240,14 @@ impl Renderer {
                 decoder.read_image(&mut image_buf)?;
 
                 // This code copies image to GPU memory converting RGB to RGBA
-                // without setting the Alpha component so it is
+                // without setting the Alpha component, so it is
                 // some random value from memory
                 buffer
-                    .par_chunks_exact_mut(RGBA_LEN as usize)
+                    .par_chunks_exact_mut(RGBA_SIZE)
                     .enumerate()
                     .for_each(|(i, pixel)| {
-                        let pos = i * RGB_LEN;
-                        pixel[..RGB_LEN].copy_from_slice(&image_buf[pos..pos + RGB_LEN]);
+                        let pos = i * RGB_SIZE;
+                        pixel[..RGB_SIZE].copy_from_slice(&image_buf[pos..pos + RGB_SIZE]);
                     });
             }
             ColorType::Rgba8 => decoder.read_image(buffer)?,
@@ -262,13 +258,14 @@ impl Renderer {
 
     fn save_images(buffer: &[u8], infos: &[(ImageInfo, usize)], output_dir: &Path) {
         for (info, offset) in infos {
+            // Replace with `filename()`
             let filename = sanitize_filename::sanitize(&*info.path);
             let mut path = output_dir.to_path_buf();
             path.push(filename);
             match info.color_type {
                 ColorType::Rgb8 => {
                     let img = RgbImage::from_par_fn(info.width, info.height, |x, y| {
-                        let pos = offset + (x + y * info.width) as usize * RGBA_LEN;
+                        let pos = offset + (x + y * info.width) as usize * RGBA_SIZE;
                         Rgb([buffer[pos], buffer[pos + 1], buffer[pos + 2]])
                     });
                     if let Err(e) = img.save(&path) {
@@ -277,7 +274,7 @@ impl Renderer {
                 }
                 ColorType::Rgba8 => {
                     let img = RgbaImage::from_par_fn(info.width, info.height, |x, y| {
-                        let pos = offset + (x + y * info.width) as usize * RGBA_LEN;
+                        let pos = offset + (x + y * info.width) as usize * RGBA_SIZE;
                         Rgba([
                             buffer[pos],
                             buffer[pos + 1],
@@ -313,7 +310,7 @@ impl Display for LoadError {
     }
 }
 
-impl std::error::Error for LoadError {}
+impl Error for LoadError {}
 
 fn gaussian_kernel(sigma: f32) -> Vec<f32> {
     let size = 6 * sigma as usize + 1;
@@ -356,7 +353,7 @@ fn get_decoder(path: &str) -> Result<Decoder> {
 
     match decoder.color_type() {
         ColorType::Rgb8 | ColorType::Rgba8 => Ok(decoder),
-        _ => Err(anyhow!("{path} has unsuppoted color type")),
+        _ => Err(anyhow!("{path} has unsupported color type")),
     }
 }
 
@@ -364,18 +361,22 @@ pub type Decoder = Box<dyn ImageDecoder + Send + Sync>;
 
 #[derive(Debug)]
 pub struct ImageInfo {
+    // Replace with `Arc<Path>`
     path: Arc<str>,
     width: u32,
     height: u32,
     color_type: ColorType,
     rgba_size: usize,
-    // original_color_type: ExtendedColorType,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Parser)]
 pub struct Config {
+    #[arg(short)]
     pub working_buffer_size: usize,
-    pub group_size: (u32, u32),
+    #[arg(short)]
+    pub group_size: u32,
+    #[arg(short)]
     pub sigma: f32,
+    #[arg(short)]
     pub output_dir: PathBuf,
 }

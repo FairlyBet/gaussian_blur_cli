@@ -12,8 +12,8 @@ fn main() {
     }
     let config = blur::Config {
         working_buffer_size: 100_000_000,
-        group_size: (2, 2),
-        sigma: 10.0,
+        group_size: 2,
+        sigma: 4.0,
         output_dir: std::path::PathBuf::try_from(r"C:\Users\Aleksandr\Desktop\output").unwrap(),
     };
 

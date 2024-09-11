@@ -20,7 +20,7 @@ impl<T> ImageBuffer<T> {
         let flags = flags | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT;
         // SAFETY:
         // The subsequent code is valid OpenGL code.
-        // In case of not loaded OpenGL functions it will result panicing.
+        // In case of not loaded OpenGL functions it will result panicking.
         unsafe {
             let mut buffer = 0;
             gl::GenBuffers(1, &mut buffer);
@@ -51,13 +51,13 @@ impl<T> ImageBuffer<T> {
     }
 
     /// ### SAFETY:
-    /// 
+    ///
     /// Correct `access` and `format` values must be provided.
     /// Providing incorrect values does not lead to undefined behaviour but
     /// will cause OpenGL errors
     pub unsafe fn bind_image_texture(&self, unit: u32, access: u32, format: u32) {
         // SAFETY:
-        // The subsequent code is memory-safe 
+        // The subsequent code is memory-safe
         unsafe {
             gl::BindTexture(Self::TARGET, self.texture);
             gl::TexBuffer(Self::TARGET, format, self.buffer);
@@ -71,7 +71,7 @@ impl ImageBuffer<Regular> {
         let isize: isize = size.try_into().ok()?;
         // SAFETY:
         // The subsequent code is valid OpenGL code, so it is safe
-        // In case of calling from OpenGl contextless thread will result
+        // In case of calling from OpenGl context-less thread will result
         // in panic
         unsafe {
             let mut buffer = 0;
@@ -125,7 +125,10 @@ impl ImageBuffer<PersistentWrite> {
     /// Also writing to buffer while it is used by GPU will
     /// cause data races and unpredictable result
     pub unsafe fn data(&mut self) -> &mut [u8] {
-        slice::from_raw_parts_mut(self.ptr, self.size)
+        // SAFETY:
+        // It is safe because inner buffer exists as long as `self`
+        // so pointer is valid and `size` is the size of the buffer
+        unsafe { slice::from_raw_parts_mut(self.ptr, self.size) }
     }
 }
 
@@ -212,7 +215,7 @@ impl<T: Copy> UniformBuffer<T> {
 impl<T> Drop for UniformBuffer<T> {
     fn drop(&mut self) {
         // SAFETY:
-        // As buffer existance is guaranteed by creation API
+        // As buffer existence is guaranteed by creation API
         // it is safe to delete it
         unsafe {
             gl::DeleteBuffers(1, &self.buffer);

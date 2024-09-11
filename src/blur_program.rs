@@ -1,5 +1,5 @@
 use glfw::Version;
-use std::{ffi::CString, i32, marker::PhantomData};
+use std::{ffi::CString, marker::PhantomData};
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -13,7 +13,7 @@ pub struct BlurProgram {
     program: u32,
     direction_location: i32,
     group_size: (u32, u32),
-    _marker: PhantomData<*const ()>, // Neither Send or Sync
+    _marker: PhantomData<*const ()>, // Neither Send nor Sync
 }
 
 impl BlurProgram {
@@ -36,6 +36,7 @@ impl BlurProgram {
             if is_linked == gl::FALSE as i32 {
                 return None;
             }
+
             gl::UseProgram(program);
             let name = CString::new("direction").ok()?;
             let direction_location = gl::GetUniformLocation(program, name.as_ptr());
@@ -164,7 +165,7 @@ impl Drop for BlurProgram {
 
 struct ComputeShader {
     shader: u32,
-    _marker: PhantomData<*const ()>, // Neither Send or Sync
+    _marker: PhantomData<*const ()>, // Neither Send nor Sync
 }
 
 impl ComputeShader {
