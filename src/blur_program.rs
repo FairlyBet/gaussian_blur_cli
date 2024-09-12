@@ -17,7 +17,7 @@ pub struct BlurProgram {
 }
 
 impl BlurProgram {
-    pub const MAX_BUFFER_SIZE: usize = i32::MAX as usize;
+    pub const MAX_BUFFER_SIZE: usize = i32::MAX as usize * 4;
     pub const INPUT_BINDING_UNIT: u32 = 0;
     pub const OUTPUT_BINDING_UNIT: u32 = 1;
     pub const IMAGE_DATA_BINDING_POINT: u32 = 2;
@@ -140,14 +140,14 @@ layout(std140, binding = {}) uniform ImageData {{
         }
     }
 
-    pub fn set_horizontal(&self) {
+    pub fn set_horizontal(&mut self) {
         self.use_();
         unsafe {
             gl::ProgramUniform2i(self.program, self.direction_location, 1, 0);
         }
     }
 
-    pub fn set_vertical(&self) {
+    pub fn set_vertical(&mut self) {
         self.use_();
         unsafe {
             gl::ProgramUniform2i(self.program, self.direction_location, 0, 1);

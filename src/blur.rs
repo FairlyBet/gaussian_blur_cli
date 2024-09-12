@@ -72,7 +72,7 @@ impl Renderer {
 
     pub fn process(&self, mut images: Vec<Arc<Path>>, config: &Config) -> Result<()> {
         let kernel = gaussian_kernel(config.sigma);
-        let program = BlurProgram::new(
+        let mut program = BlurProgram::new(
             self.window.get_context_version(),
             (config.group_size, config.group_size),
             &kernel,
@@ -145,6 +145,8 @@ impl Renderer {
 
             // SAFETY:
             // This is just safe :)
+            // Ensuring that GPU performs all the queried commands
+            // 
             unsafe {
                 gl::Finish();
             }

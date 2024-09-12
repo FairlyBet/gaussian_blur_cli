@@ -13,18 +13,20 @@ fn main() {
     for path in args.images {
         paths.push(path.as_path().into());
     }
-    match fs::read_dir(args.input_dir) {
-        Ok(entries) => {
-            for enty in entries {
-                match enty {
-                    Ok(enty) => {
-                        paths.push(enty.path().as_path().into());
+    if let Some(input_dir) = args.input_dir {
+        match fs::read_dir(input_dir) {
+            Ok(entries) => {
+                for enty in entries {
+                    match enty {
+                        Ok(enty) => {
+                            paths.push(enty.path().as_path().into());
+                        }
+                        Err(e) => eprintln!("{e}"),
                     }
-                    Err(e) => eprintln!("{e}"),
                 }
             }
+            Err(e) => eprintln!("{e}"),
         }
-        Err(e) => eprintln!("{e}"),
     }
     let config = Config {
         working_buffer_size: args.working_buffer_size,
@@ -32,22 +34,17 @@ fn main() {
         sigma: args.sigma,
         output_dir: args.output_dir,
     };
-    // let config = Config {
-    //     working_buffer_size: 10000000,
-    //     group_size: 16,
-    //     sigma: 11.0,
-    //     output_dir: Default::default(),
-    // };
+
     match Renderer::new() {
         Some(renderer) => {
             if args.max_image_size {
                 println!("{}", renderer.max_image_size());
             }
             if let Err(e) = renderer.process(paths, &config) {
-                println!("{e}");
+                eprintln!("{e}");
             }
         }
-        _ => println!("Can't create OpenGL context"),
+        _ => eprintln!("Can't create OpenGL context"),
     }
 }
 
@@ -55,16 +52,16 @@ fn main() {
 struct Args {
     #[arg(short)]
     max_image_size: bool,
-    #[arg(short)]
+    #[arg(short, default_value_t = 100_000_000)]
     working_buffer_size: usize,
-    #[arg(short)]
+    #[arg(short, default_value_t = 8)]
     group_size: u32,
     #[arg(short)]
     sigma: f32,
-    #[arg(short)]
+    #[arg(short, default_value = "")]
     output_dir: PathBuf,
     #[arg(short)]
-    input_dir: PathBuf,
+    input_dir: Option<PathBuf>,
     #[arg(long)]
     images: Vec<PathBuf>,
 }

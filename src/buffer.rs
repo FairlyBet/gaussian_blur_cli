@@ -15,12 +15,17 @@ pub struct ImageBuffer<T> {
 impl<T> ImageBuffer<T> {
     const TARGET: u32 = gl::TEXTURE_BUFFER;
 
+    /// Creates and maps persistently a `TEXTURE_BUFFER` object
+    /// with `flags | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT` flags set
+    /// of size `size`
     fn new_persistent(size: usize, flags: u32) -> Option<Self> {
-        let isize: isize = size.try_into().ok()?;
+        let isize = size.try_into().ok()?;
         let flags = flags | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT;
         // SAFETY:
-        // The subsequent code is valid OpenGL code.
-        // In case of not loaded OpenGL functions it will result panicking.
+        // The subsequent code is valid OpenGL API calls
+        // Returning pointer is checked to not be null
+        // In case of calling from OpenGl context-less thread
+        // or not being able to create reqired objects will return `None`
         unsafe {
             let mut buffer = 0;
             gl::GenBuffers(1, &mut buffer);
@@ -54,10 +59,13 @@ impl<T> ImageBuffer<T> {
     ///
     /// Correct `access` and `format` values must be provided.
     /// Providing incorrect values does not lead to undefined behaviour but
-    /// will cause OpenGL errors
+    /// will cause OpenGL errors or incorrect results in shader program.
+    /// Providing `unit` that does not correspond to using shader program
+    /// will not cause errors and will be just ignored
     pub unsafe fn bind_image_texture(&self, unit: u32, access: u32, format: u32) {
         // SAFETY:
-        // The subsequent code is memory-safe
+        // The subsequent code is memory-safe as no pointers are involved,
+        // is correct OpenGL API calls and provides valid `texture` value
         unsafe {
             gl::BindTexture(Self::TARGET, self.texture);
             gl::TexBuffer(Self::TARGET, format, self.buffer);
@@ -68,11 +76,11 @@ impl<T> ImageBuffer<T> {
 
 impl ImageBuffer<Regular> {
     pub fn new(size: usize) -> Option<Self> {
-        let isize: isize = size.try_into().ok()?;
+        let isize = size.try_into().ok()?;
         // SAFETY:
-        // The subsequent code is valid OpenGL code, so it is safe
-        // In case of calling from OpenGl context-less thread will result
-        // in panic
+        // The subsequent code is valid OpenGL API calls
+        // In case of calling from OpenGl context-less thread
+        // or not being able to create reqired objects will return `None`
         unsafe {
             let mut buffer = 0;
             gl::GenBuffers(1, &mut buffer);
@@ -158,9 +166,11 @@ impl<T> UniformBuffer<T> {
     const TARGET: u32 = gl::UNIFORM_BUFFER;
 
     pub fn new() -> Option<Self> {
-        let isize: isize = mem::size_of::<T>().try_into().ok()?;
+        let isize = mem::size_of::<T>().try_into().ok()?;
         // SAFETY:
-        //
+        // The subsequent code is valid OpenGL API calls
+        // In case of calling from OpenGl context-less thread
+        // or not being able to create reqired objects will return `None`
         unsafe {
             let mut buffer = 0;
             gl::GenBuffers(1, &mut buffer);
@@ -178,6 +188,8 @@ impl<T> UniformBuffer<T> {
     }
 
     pub fn update(&mut self, data: T) {
+        // SAFETY:
+        // This is safe...
         unsafe {
             gl::BindBuffer(Self::TARGET, self.buffer);
             gl::BufferSubData(
@@ -190,6 +202,8 @@ impl<T> UniformBuffer<T> {
     }
 
     pub fn bind_buffer_base(&self, index: u32) {
+        // SAFETY:
+        // 
         unsafe {
             gl::BindBufferBase(Self::TARGET, index, self.buffer);
         }
