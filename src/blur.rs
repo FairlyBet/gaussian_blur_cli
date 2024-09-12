@@ -114,23 +114,7 @@ impl Renderer {
                 );
             }
             program.set_horizontal();
-            for (img, offset) in &loaded_images {
-                image_data_buffer.update(ImageData {
-                    offset: (*offset / RGBA_SIZE) as i32,
-                    width: img.width as i32,
-                    height: img.height as i32,
-                });
-
-                // SAFETY:
-                //
-                unsafe {
-                    gl::DispatchCompute(
-                        img.width.div_ceil(program.group_size().0),
-                        img.height.div_ceil(program.group_size().1),
-                        1,
-                    );
-                }
-            }
+            Self::render(&loaded_images, &mut image_data_buffer, &program);
 
             // SAFETY:
             //
@@ -147,23 +131,7 @@ impl Renderer {
                 );
             }
             program.set_vertical();
-            for (img, offset) in &loaded_images {
-                image_data_buffer.update(ImageData {
-                    offset: (*offset / RGBA_SIZE) as i32,
-                    width: img.width as i32,
-                    height: img.height as i32,
-                });
-
-                // SAFETY:
-                //
-                unsafe {
-                    gl::DispatchCompute(
-                        img.width.div_ceil(program.group_size().0),
-                        img.height.div_ceil(program.group_size().1),
-                        1,
-                    );
-                }
-            }
+            Self::render(&loaded_images, &mut image_data_buffer, &program);
 
             // SAFETY:
             // This is just safe :)
@@ -282,6 +250,30 @@ impl Renderer {
             _ => unreachable!(),
         }
         Ok(())
+    }
+
+    fn render(
+        loaded_images: &Vec<(ImageInfo, usize)>,
+        image_data_buffer: &mut UniformBuffer<ImageData>,
+        program: &BlurProgram,
+    ) {
+        for (img, offset) in loaded_images {
+            image_data_buffer.update(ImageData {
+                offset: (*offset / RGBA_SIZE) as i32,
+                width: img.width as i32,
+                height: img.height as i32,
+            });
+
+            // SAFETY:
+            //
+            unsafe {
+                gl::DispatchCompute(
+                    img.width.div_ceil(program.group_size().0),
+                    img.height.div_ceil(program.group_size().1),
+                    1,
+                );
+            }
+        }
     }
 
     fn save_images(buffer: &[u8], infos: &[(ImageInfo, usize)], output_dir: &Path) {
