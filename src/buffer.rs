@@ -25,7 +25,7 @@ impl<T> ImageBuffer<T> {
         // The subsequent code is valid OpenGL API calls
         // Returning pointer is checked to not be null
         // In case of calling from OpenGl context-less thread
-        // or not being able to create reqired objects will return `None`
+        // or not being able to create required objects will return `None`
         unsafe {
             let mut buffer = 0;
             gl::GenBuffers(1, &mut buffer);
@@ -81,7 +81,7 @@ impl ImageBuffer<Regular> {
         // SAFETY:
         // The subsequent code is valid OpenGL API calls
         // In case of calling from OpenGl context-less thread
-        // or not being able to create reqired objects will return `None`
+        // or not being able to create required objects will return `None`
         unsafe {
             let mut buffer = 0;
             gl::GenBuffers(1, &mut buffer);
@@ -174,7 +174,7 @@ impl<T> UniformBuffer<T> {
         // is memory-safe as providing pointer is converted from
         // a mutable reference which is valid by default
         // In case of calling from OpenGl context-less thread
-        // or not being able to create reqired objects will return `None`
+        // or not being able to create required objects will return `None`
         unsafe {
             let mut buffer = 0;
             gl::GenBuffers(1, &mut buffer);

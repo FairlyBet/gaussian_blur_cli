@@ -16,10 +16,10 @@ fn main() {
     if let Some(input_dir) = args.input_dir {
         match fs::read_dir(input_dir) {
             Ok(entries) => {
-                for enty in entries {
-                    match enty {
-                        Ok(enty) => {
-                            paths.push(enty.path().as_path().into());
+                for entry in entries {
+                    match entry {
+                        Ok(entry) => {
+                            paths.push(entry.path().as_path().into());
                         }
                         Err(e) => eprintln!("{e}"),
                     }
