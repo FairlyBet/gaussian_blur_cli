@@ -1,3 +1,4 @@
+use crate::blur::RGBA_SIZE;
 use glfw::Version;
 use std::{ffi::CString, marker::PhantomData};
 
@@ -17,7 +18,7 @@ pub struct BlurProgram {
 }
 
 impl BlurProgram {
-    pub const MAX_BUFFER_SIZE: usize = i32::MAX as usize * 4;
+    pub const MAX_BUFFER_SIZE: usize = i32::MAX as usize * RGBA_SIZE;
     pub const INPUT_BINDING_UNIT: u32 = 0;
     pub const OUTPUT_BINDING_UNIT: u32 = 1;
     pub const IMAGE_DATA_BINDING_POINT: u32 = 2;

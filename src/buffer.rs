@@ -59,13 +59,14 @@ impl<T> ImageBuffer<T> {
     ///
     /// Correct `access` and `format` values must be provided.
     /// Providing incorrect values does not lead to undefined behaviour but
-    /// will cause OpenGL errors or incorrect results in shader program.
-    /// Providing `unit` that does not correspond to using shader program
+    /// will cause OpenGL errors or incorrect results in shader program which may vary
+    /// depending on driver implementation.
+    /// Providing `unit` that does not correspond to shader program
     /// will not cause errors and will be just ignored
     pub unsafe fn bind_image_texture(&self, unit: u32, access: u32, format: u32) {
         // SAFETY:
         // The subsequent code is memory-safe as no pointers are involved,
-        // is correct OpenGL API calls and provides valid `texture` value
+        // is correct OpenGL API calls and provides valid `texture` and `buffer` values
         unsafe {
             gl::BindTexture(Self::TARGET, self.texture);
             gl::TexBuffer(Self::TARGET, format, self.buffer);
@@ -159,7 +160,7 @@ impl<T> Drop for ImageBuffer<T> {
 
 pub struct UniformBuffer<T> {
     buffer: u32,
-    _marker: PhantomData<*const T>,
+    _marker: PhantomData<*const T>, // Neither Send nor Sync
 }
 
 impl<T> UniformBuffer<T> {
@@ -168,7 +169,10 @@ impl<T> UniformBuffer<T> {
     pub fn new() -> Option<Self> {
         let isize = mem::size_of::<T>().try_into().ok()?;
         // SAFETY:
-        // The subsequent code is valid OpenGL API calls
+        // The subsequent code is valid OpenGL API calls,
+        // provides correct values for functions,
+        // is memory-safe as providing pointer is converted from
+        // a mutable reference which is valid by default
         // In case of calling from OpenGl context-less thread
         // or not being able to create reqired objects will return `None`
         unsafe {
@@ -189,7 +193,7 @@ impl<T> UniformBuffer<T> {
 
     pub fn update(&mut self, data: T) {
         // SAFETY:
-        // This is safe...
+        // This is safe because
         unsafe {
             gl::BindBuffer(Self::TARGET, self.buffer);
             gl::BufferSubData(
@@ -203,7 +207,8 @@ impl<T> UniformBuffer<T> {
 
     pub fn bind_buffer_base(&self, index: u32) {
         // SAFETY:
-        // 
+        // This is safe as providing `buffer` value is valid
+        // and guaranteed by creation API
         unsafe {
             gl::BindBufferBase(Self::TARGET, index, self.buffer);
         }

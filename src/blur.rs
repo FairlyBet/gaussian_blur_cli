@@ -31,8 +31,8 @@ use std::{
     sync::Arc,
 };
 
-const RGB_SIZE: usize = 3;
-const RGBA_SIZE: usize = 4;
+pub const RGB_SIZE: usize = 3;
+pub const RGBA_SIZE: usize = 4;
 
 #[derive(Debug)]
 pub struct Renderer {
@@ -53,7 +53,8 @@ impl Renderer {
 
         let mut max_texture_buffer_size = 0;
         // SAFETY:
-        // The subsequent code is valid and safe
+        // The subsequent code is and safe as a providing pointer is created from
+        // a valid reference to a variable
         unsafe {
             gl::GetInteger64v(gl::MAX_TEXTURE_BUFFER_SIZE, &mut max_texture_buffer_size);
         }
@@ -97,6 +98,22 @@ impl Renderer {
             // and it is not being used by GPU at this moment
             let input_slice = unsafe { input_buffer.data() };
             let loaded_images = self.load_images(&mut images, input_slice);
+
+            // SAFETY:
+            //
+            unsafe {
+                input_buffer.bind_image_texture(
+                    BlurProgram::INPUT_BINDING_UNIT,
+                    gl::READ_ONLY,
+                    gl::RGBA8,
+                );
+                intermediate_buffer.bind_image_texture(
+                    BlurProgram::OUTPUT_BINDING_UNIT,
+                    gl::WRITE_ONLY,
+                    gl::RGBA8,
+                );
+            }
+            program.set_horizontal();
             for (img, offset) in &loaded_images {
                 image_data_buffer.update(ImageData {
                     offset: (*offset / RGBA_SIZE) as i32,
@@ -107,34 +124,39 @@ impl Renderer {
                 // SAFETY:
                 //
                 unsafe {
-                    input_buffer.bind_image_texture(
-                        BlurProgram::INPUT_BINDING_UNIT,
-                        gl::READ_ONLY,
-                        gl::RGBA8,
-                    );
-                    intermediate_buffer.bind_image_texture(
-                        BlurProgram::OUTPUT_BINDING_UNIT,
-                        gl::WRITE_ONLY,
-                        gl::RGBA8,
-                    );
-                    program.set_horizontal();
                     gl::DispatchCompute(
                         img.width.div_ceil(program.group_size().0),
                         img.height.div_ceil(program.group_size().1),
                         1,
                     );
+                }
+            }
 
-                    intermediate_buffer.bind_image_texture(
-                        BlurProgram::INPUT_BINDING_UNIT,
-                        gl::READ_ONLY,
-                        gl::RGBA8,
-                    );
-                    output_buffer.bind_image_texture(
-                        BlurProgram::OUTPUT_BINDING_UNIT,
-                        gl::WRITE_ONLY,
-                        gl::RGBA8,
-                    );
-                    program.set_vertical();
+            // SAFETY:
+            //
+            unsafe {
+                intermediate_buffer.bind_image_texture(
+                    BlurProgram::INPUT_BINDING_UNIT,
+                    gl::READ_ONLY,
+                    gl::RGBA8,
+                );
+                output_buffer.bind_image_texture(
+                    BlurProgram::OUTPUT_BINDING_UNIT,
+                    gl::WRITE_ONLY,
+                    gl::RGBA8,
+                );
+            }
+            program.set_vertical();
+            for (img, offset) in &loaded_images {
+                image_data_buffer.update(ImageData {
+                    offset: (*offset / RGBA_SIZE) as i32,
+                    width: img.width as i32,
+                    height: img.height as i32,
+                });
+
+                // SAFETY:
+                //
+                unsafe {
                     gl::DispatchCompute(
                         img.width.div_ceil(program.group_size().0),
                         img.height.div_ceil(program.group_size().1),
@@ -146,7 +168,7 @@ impl Renderer {
             // SAFETY:
             // This is just safe :)
             // Ensuring that GPU performs all the queried commands
-            // 
+            //
             unsafe {
                 gl::Finish();
             }
