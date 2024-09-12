@@ -259,6 +259,7 @@ impl Renderer {
         match decoder.color_type() {
             ColorType::Rgb8 => {
                 let size = decoder.total_bytes() as usize;
+                // Creating an uninitialized buffer for image reading
                 let mut image_buf = Vec::with_capacity(size);
                 // SAFETY:
                 // This is safe as `image_buf` is created with capacity of `size`
