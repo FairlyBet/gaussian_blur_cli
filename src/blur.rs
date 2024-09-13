@@ -86,9 +86,9 @@ impl Renderer {
         .ok_or(anyhow!("Cannot create shader program"))?;
         program.use_();
 
-        let mut image_data_buffer =
+        let mut image_data =
             UniformBuffer::<ImageData>::new().ok_or(anyhow!("Cannot create uniform buffer"))?;
-        image_data_buffer.bind_buffer_base(BlurProgram::IMAGE_DATA_BINDING_POINT);
+        image_data.bind_buffer_base(BlurProgram::IMAGE_DATA_BINDING_POINT);
 
         let mut input_buffer = ImageBuffer::new_writable(config.working_buffer_size)
             .ok_or(anyhow!("Cannot create working buffer"))?;
@@ -101,8 +101,8 @@ impl Renderer {
             // SAFETY:
             // It is safe because buffer usage is only writing
             // and it is not being used by GPU at this moment
-            let input_slice = unsafe { input_buffer.data() };
-            let loaded_images = self.load_images(&mut images, input_slice);
+            let buffer = unsafe { input_buffer.data() };
+            let loaded_images = self.load_images(&mut images, buffer);
 
             // SAFETY:
             //
@@ -119,7 +119,7 @@ impl Renderer {
                 );
             }
             program.set_horizontal();
-            Self::render(&loaded_images, &mut image_data_buffer, &program);
+            Self::render(&loaded_images, &mut image_data, &program);
 
             // SAFETY:
             //
@@ -136,7 +136,7 @@ impl Renderer {
                 );
             }
             program.set_vertical();
-            Self::render(&loaded_images, &mut image_data_buffer, &program);
+            Self::render(&loaded_images, &mut image_data, &program);
 
             // SAFETY:
             // This is just safe :)
@@ -161,16 +161,17 @@ impl Renderer {
     fn load_images(
         &self,
         images: &mut Vec<Arc<Path>>,
-        mut input_slice: &mut [u8],
+        mut buffer: &mut [u8],
     ) -> Vec<(ImageInfo, usize)> {
+        let working_buffer_size = buffer.len();
         let mut loaded_images = vec![];
         let mut offset = 0;
         let mut i = 0;
         while i < images.len() {
             let path = images[i].clone();
-            match self.try_load(path.clone(), input_slice) {
+            match Self::try_load(path.clone(), buffer, working_buffer_size) {
                 Ok(info) => {
-                    input_slice = input_slice.split_at_mut(info.rgba_size).1;
+                    buffer = buffer.split_at_mut(info.rgba_size).1;
                     let size = info.rgba_size;
                     loaded_images.push((info, offset));
                     offset += size;
@@ -178,7 +179,7 @@ impl Renderer {
                 }
                 Err(err) => match err {
                     LoadError::TooLargeImage => {
-                        error!("{path:#?} does not fit into working buffer");
+                        error!("{path:?} does not fit into working buffer");
                         _ = images.remove(i);
                     }
                     LoadError::DecoderError(e) => {
@@ -192,17 +193,21 @@ impl Renderer {
         loaded_images
     }
 
-    fn try_load(&self, path: Arc<Path>, buffer: &mut [u8]) -> result::Result<ImageInfo, LoadError> {
+    fn try_load(
+        path: Arc<Path>,
+        buffer: &mut [u8],
+        working_buffer_size: usize,
+    ) -> result::Result<ImageInfo, LoadError> {
         match get_decoder(&path) {
             Ok(decoder) => {
-                let size = if decoder.color_type() == ColorType::Rgb8 {
-                    self::rgb_size_to_rgba_size(decoder.total_bytes())
-                        .ok_or(LoadError::TooLargeImage)?
-                } else {
-                    decoder.total_bytes()
+                let size = match decoder.color_type() {
+                    ColorType::Rgb8 => self::rgb_size_to_rgba_size(decoder.total_bytes())
+                        .ok_or(LoadError::TooLargeImage)?,
+                    ColorType::Rgba8 => decoder.total_bytes(),
+                    _ => unreachable!(),
                 };
                 let size: usize = size.try_into().map_err(|_| LoadError::TooLargeImage)?;
-                if size > self.max_image_size {
+                if size > working_buffer_size {
                     return Err(LoadError::TooLargeImage);
                 }
                 if size > buffer.len() {
@@ -262,6 +267,8 @@ impl Renderer {
     ) {
         for (img, offset) in loaded_images {
             image_data_buffer.update(ImageData {
+                // Here we're dividing by RGBA_SIZE because we need offset
+                // of the whole Rbga pixel and not the particular byte
                 offset: (*offset / RGBA_SIZE) as i32,
                 width: img.width as i32,
                 height: img.height as i32,

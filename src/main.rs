@@ -15,8 +15,8 @@ fn main() {
         .init();
 
     let args = Args::parse();
-    let mut paths = vec![];
 
+    let mut paths = vec![];
     for path in &args.images {
         paths.push(path.as_path().into());
     }
