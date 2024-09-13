@@ -1,6 +1,7 @@
 use crate::blur::RGBA_SIZE;
 use glfw::Version;
 use std::{ffi::CString, marker::PhantomData};
+use tracing::error;
 
 #[derive(Debug)]
 #[repr(C)]
@@ -41,6 +42,10 @@ impl BlurProgram {
             gl::UseProgram(program);
             let name = CString::new("direction").ok()?;
             let direction_location = gl::GetUniformLocation(program, name.as_ptr());
+
+            if direction_location == -1 {
+                return None;
+            }
 
             Some(Self {
                 program,
@@ -141,14 +146,14 @@ layout(std140, binding = {}) uniform ImageData {{
         }
     }
 
-    pub fn set_horizontal(&mut self) {
+    pub fn set_horizontal(&self) {
         self.use_();
         unsafe {
             gl::ProgramUniform2i(self.program, self.direction_location, 1, 0);
         }
     }
 
-    pub fn set_vertical(&mut self) {
+    pub fn set_vertical(&self) {
         self.use_();
         unsafe {
             gl::ProgramUniform2i(self.program, self.direction_location, 0, 1);
@@ -180,22 +185,24 @@ impl ComputeShader {
             let src_len: i32 = src.count_bytes().try_into().ok()?;
             gl::ShaderSource(shader, 1, &src.as_ptr(), &src_len);
             gl::CompileShader(shader);
+
             let mut is_compiled = 0;
             gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut is_compiled);
+
             if is_compiled == gl::FALSE as i32 {
                 let mut len = 0;
                 gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len);
-                let mut v: Vec<u8> = Vec::with_capacity(len.try_into().unwrap());
-                let mut len_written = 0;
+                let mut chars: Vec<u8> = Vec::with_capacity(len.try_into().unwrap());
+                let mut written_len = 0;
                 gl::GetShaderInfoLog(
                     shader,
-                    v.capacity().try_into().unwrap(),
-                    &mut len_written,
-                    v.as_mut_ptr().cast(),
+                    chars.capacity().try_into().unwrap(),
+                    &mut written_len,
+                    chars.as_mut_ptr().cast(),
                 );
-                v.set_len(len_written.try_into().unwrap());
-
-                println!("{}", String::from_utf8_lossy(&v).into_owned());
+                assert!(written_len <= len);
+                chars.set_len(written_len.try_into().unwrap());
+                error!("{}", String::from_utf8_lossy(&chars));
                 return None;
             }
 

@@ -58,8 +58,8 @@ impl Renderer {
 
         let mut max_texture_buffer_size = 0;
         // SAFETY:
-        // The subsequent code is and safe as a providing pointer is created from
-        // a valid reference to a variable
+        // The subsequent code is safe as a providing pointer is created from
+        // a valid reference to a local variable
         unsafe {
             gl::GetInteger64v(gl::MAX_TEXTURE_BUFFER_SIZE, &mut max_texture_buffer_size);
         }
@@ -78,7 +78,7 @@ impl Renderer {
 
     pub fn process(&self, mut images: Vec<Arc<Path>>, config: &Config) -> Result<()> {
         let kernel = gaussian_kernel(config.sigma);
-        let mut program = BlurProgram::new(
+        let program = BlurProgram::new(
             self.window.get_context_version(),
             (config.group_size, config.group_size),
             &kernel,

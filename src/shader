@@ -1,3 +1,7 @@
+// This is an example of a shader that might be used
+// The actual shader code is produced in runtime based
+// on `group_size` and `kernel` values
+
 #version 430 core
 
 layout(local_size_x = 2, local_size_y = 2) in;

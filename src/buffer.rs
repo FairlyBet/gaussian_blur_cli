@@ -1,4 +1,9 @@
-use std::{marker::PhantomData, mem, ptr, slice};
+use std::{
+    marker::PhantomData,
+    mem,
+    ptr::{self, NonNull},
+    slice,
+};
 
 pub struct PersistentRead;
 pub struct PersistentWrite;
@@ -8,7 +13,7 @@ pub struct ImageBuffer<T> {
     buffer: u32,
     texture: u32,
     size: usize,
-    ptr: *mut u8,
+    ptr: Option<NonNull<u8>>,
     _marker: PhantomData<T>,
 }
 
@@ -49,7 +54,7 @@ impl<T> ImageBuffer<T> {
                 buffer,
                 texture,
                 size,
-                ptr: ptr.cast(),
+                ptr: NonNull::new(ptr.cast()),
                 _marker: PhantomData,
             })
         }
@@ -59,14 +64,14 @@ impl<T> ImageBuffer<T> {
     ///
     /// Correct `access` and `format` values must be provided.
     /// Providing incorrect values does not lead to undefined behaviour but
-    /// will cause OpenGL errors or incorrect results in shader program which may vary
-    /// depending on driver implementation.
+    /// will cause OpenGL errors or implementation-specific behaviour
+    /// in shader program.
     /// Providing `unit` that does not correspond to shader program
     /// will not cause errors and will be just ignored
     pub unsafe fn bind_image_texture(&self, unit: u32, access: u32, format: u32) {
         // SAFETY:
-        // The subsequent code is memory-safe as no pointers are involved,
-        // is correct OpenGL API calls and provides valid `texture` and `buffer` values
+        // The subsequent code is valid OpenGL calls, provides correct
+        // values such as `texture`, `buffer`, `TARGET`
         unsafe {
             gl::BindTexture(Self::TARGET, self.texture);
             gl::TexBuffer(Self::TARGET, format, self.buffer);
@@ -101,7 +106,7 @@ impl ImageBuffer<Regular> {
                 buffer,
                 texture,
                 size,
-                ptr: ptr::null_mut(),
+                ptr: None,
                 _marker: PhantomData,
             })
         }
@@ -118,7 +123,10 @@ impl ImageBuffer<PersistentRead> {
     /// Reading from returning slice while it is used by GPU will
     /// cause data races and unpredictable results
     pub unsafe fn data(&self) -> &[u8] {
-        slice::from_raw_parts(self.ptr, self.size)
+        // SAFETY:
+        // It is safe because inner buffer exists as long as `self`
+        // and the pointer is guaranteed to be valid
+        unsafe { slice::from_raw_parts(self.ptr.unwrap().as_ptr(), self.size) }
     }
 }
 
@@ -136,20 +144,22 @@ impl ImageBuffer<PersistentWrite> {
     pub unsafe fn data(&mut self) -> &mut [u8] {
         // SAFETY:
         // It is safe because inner buffer exists as long as `self`
-        // so pointer is valid and `size` is the size of the buffer
-        unsafe { slice::from_raw_parts_mut(self.ptr, self.size) }
+        // and the pointer is guaranteed to be valid
+        unsafe { slice::from_raw_parts_mut(self.ptr.unwrap().as_ptr(), self.size) }
     }
 }
 
 impl<T> Drop for ImageBuffer<T> {
     fn drop(&mut self) {
         // SAFETY:
-        // Buffer creation API guarantees its existence and mapping state
-        // so subsequent code is valid and safe
+        // Buffer and texture creation API guarantees their existence
+        // so it is safe to delete it
+        // Also if buffer was mapped the `ptr` will be `Some` value
+        // so in this case it is valid to unmap it
         unsafe {
             gl::DeleteTextures(1, &self.texture);
 
-            if !self.ptr.is_null() {
+            if let Some(_) = self.ptr {
                 gl::BindBuffer(Self::TARGET, self.buffer);
                 gl::UnmapBuffer(Self::TARGET);
             }
@@ -171,10 +181,10 @@ impl<T> UniformBuffer<T> {
         // SAFETY:
         // The subsequent code is valid OpenGL API calls,
         // provides correct values for functions,
-        // is memory-safe as providing pointer is converted from
+        // is memory-safe as providing pointer is created from
         // a mutable reference which is valid by default
         // In case of calling from OpenGl context-less thread
-        // or not being able to create required objects will return `None`
+        // or not being able to create required object will return `None`
         unsafe {
             let mut buffer = 0;
             gl::GenBuffers(1, &mut buffer);
@@ -193,7 +203,12 @@ impl<T> UniformBuffer<T> {
 
     pub fn update(&mut self, data: T) {
         // SAFETY:
-        // This is safe because
+        // This is safe because the `buffer` value is
+        // guaranteed to be valid buffer object id
+        // and the sending data and the buffer has the exact same size
+        // Also providing pointer is created from a valid reference to a local parameter
+        // Converting size of `T` into `isize` is also safe as it is assured that size of `T`
+        // fits into `isize` while creating buffer with `new` function
         unsafe {
             gl::BindBuffer(Self::TARGET, self.buffer);
             gl::BufferSubData(
@@ -208,18 +223,23 @@ impl<T> UniformBuffer<T> {
     pub fn bind_buffer_base(&self, index: u32) {
         // SAFETY:
         // This is safe as providing `buffer` value is valid
-        // and guaranteed by creation API
+        // and guaranteed by its creation API
         unsafe {
             gl::BindBufferBase(Self::TARGET, index, self.buffer);
         }
     }
 }
 
-/*
 impl<T: Copy> UniformBuffer<T> {
+    #[allow(unused)]
     pub fn copy_update(&mut self, data: &T) {
         // SAFETY:
-        //
+        // This is safe because the `buffer` value is
+        // guaranteed to be valid buffer object id
+        // and the sending data and the buffer has the exact same size
+        // Also providing pointer is created from a valid reference given by caller
+        // Converting size of `T` into `isize` is also safe as it is assured that size of `T`
+        // fits into `isize` while creating buffer with `new` function
         unsafe {
             gl::BindBuffer(Self::TARGET, self.buffer);
             gl::BufferSubData(
@@ -231,12 +251,11 @@ impl<T: Copy> UniformBuffer<T> {
         }
     }
 }
-*/
 
 impl<T> Drop for UniformBuffer<T> {
     fn drop(&mut self) {
         // SAFETY:
-        // As buffer existence is guaranteed by creation API
+        // As buffer existence is guaranteed by its creation API
         // it is safe to delete it
         unsafe {
             gl::DeleteBuffers(1, &self.buffer);
