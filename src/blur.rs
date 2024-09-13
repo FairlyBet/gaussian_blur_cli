@@ -1,9 +1,11 @@
 use crate::{
     blur_program::{BlurProgram, ImageData},
     buffer::{ImageBuffer, UniformBuffer},
+    Args,
 };
 use anyhow::{anyhow, Result};
 use clap::Parser;
+use config::Environment;
 use glfw::{
     fail_on_errors, ClientApiHint, GlfwReceiver, OpenGlProfileHint, PWindow, WindowEvent,
     WindowHint, WindowMode,
@@ -19,7 +21,9 @@ use rayon::{
     iter::{IndexedParallelIterator as _, ParallelIterator as _},
     slice::ParallelSliceMut as _,
 };
+use serde::Deserialize;
 use std::{
+    env,
     error::Error,
     f32,
     ffi::OsStr,
@@ -30,6 +34,7 @@ use std::{
     result,
     sync::Arc,
 };
+use tracing::error;
 
 pub const RGB_SIZE: usize = 3;
 pub const RGBA_SIZE: usize = 4;
@@ -173,13 +178,11 @@ impl Renderer {
                 }
                 Err(err) => match err {
                     LoadError::TooLargeImage => {
-                        // replace with log
-                        eprintln!("{path:#?} does not fit into working buffer");
+                        error!("{path:#?} does not fit into working buffer");
                         _ = images.remove(i);
                     }
                     LoadError::DecoderError(e) => {
-                        // replace with log
-                        eprintln!("{e}");
+                        error!("{e}");
                         _ = images.remove(i);
                     }
                     LoadError::NoSpaceLeft => i += 1,
@@ -288,7 +291,7 @@ impl Renderer {
                         Rgb([buffer[pos], buffer[pos + 1], buffer[pos + 2]])
                     });
                     if let Err(e) = img.save(&path) {
-                        eprintln!("{e}");
+                        error!("{e}");
                     }
                 }
                 ColorType::Rgba8 => {
@@ -302,7 +305,7 @@ impl Renderer {
                         ])
                     });
                     if let Err(e) = img.save(&path) {
-                        eprintln!("{e}");
+                        error!("{e}");
                     }
                 }
                 _ => unreachable!(),
@@ -376,7 +379,7 @@ fn get_decoder(path: &Path) -> Result<Decoder> {
     }
 }
 
-pub type Decoder = Box<dyn ImageDecoder + Send + Sync>;
+pub type Decoder = Box<dyn ImageDecoder>;
 
 #[derive(Debug)]
 pub struct ImageInfo {
@@ -387,10 +390,28 @@ pub struct ImageInfo {
     rgba_size: usize,
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Parser, Deserialize)]
 pub struct Config {
     pub working_buffer_size: usize,
     pub group_size: u32,
     pub sigma: f32,
     pub output_dir: PathBuf,
+}
+
+impl Config {
+    pub fn new(args: &Args) -> Result<Self> {
+        let mut conf = config::Config::builder();
+        if let Ok(path) = env::var("BLUR_CONF") {
+            conf = conf.add_source(config::File::with_name(&path));
+        }
+        let ret = conf
+            .add_source(Environment::with_prefix("BLUR"))
+            .add_source(config::File::from_str(
+                &toml::to_string(args)?,
+                config::FileFormat::Toml,
+            ))
+            .build()?
+            .try_deserialize()?;
+        Ok(ret)
+    }
 }

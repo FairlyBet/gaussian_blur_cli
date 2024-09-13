@@ -215,6 +215,7 @@ impl<T> UniformBuffer<T> {
     }
 }
 
+/*
 impl<T: Copy> UniformBuffer<T> {
     pub fn copy_update(&mut self, data: &T) {
         // SAFETY:
@@ -230,6 +231,7 @@ impl<T: Copy> UniformBuffer<T> {
         }
     }
 }
+*/
 
 impl<T> Drop for UniformBuffer<T> {
     fn drop(&mut self) {

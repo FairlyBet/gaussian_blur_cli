@@ -2,7 +2,7 @@ use crate::blur::RGBA_SIZE;
 use glfw::Version;
 use std::{ffi::CString, marker::PhantomData};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 #[repr(C)]
 pub struct ImageData {
     pub offset: i32,
