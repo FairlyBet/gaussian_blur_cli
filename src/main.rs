@@ -45,8 +45,11 @@ fn main() {
 
     match Renderer::new() {
         Some(renderer) => {
-            if args.max_image_size {
-                println!("{}", renderer.max_image_size());
+            if args.max_image_resolution {
+                println!(
+                    "Maximum resolution of an image that can be processed is {} pixels",
+                    renderer.max_image_resolution()
+                );
             }
             if let Err(e) = renderer.process(paths, &config) {
                 error!("{e}");
@@ -60,8 +63,11 @@ fn main() {
 pub struct Args {
     #[arg(index = 1, value_name = "FILES", help = "A list of images to process")]
     images: Vec<PathBuf>,
-    #[arg(short, help = "Print maximum size of a working buffer for current GPU")]
-    max_image_size: bool,
+    #[arg(
+        short,
+        help = "Print maximum resolution of an image that can be processed"
+    )]
+    max_image_resolution: bool,
     #[arg(
         short,
         value_name = "NUM",

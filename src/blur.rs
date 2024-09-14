@@ -43,7 +43,7 @@ pub const RGBA_SIZE: usize = 4;
 pub struct Renderer {
     window: PWindow,
     receiver: GlfwReceiver<(f64, WindowEvent)>,
-    max_image_size: usize,
+    max_buffer_size: usize,
 }
 
 impl Renderer {
@@ -63,17 +63,17 @@ impl Renderer {
         unsafe {
             gl::GetInteger64v(gl::MAX_TEXTURE_BUFFER_SIZE, &mut max_texture_buffer_size);
         }
-        let max_image_size = (max_texture_buffer_size as usize).min(BlurProgram::MAX_BUFFER_SIZE);
+        let max_buffer_size = (max_texture_buffer_size as usize).min(BlurProgram::MAX_BUFFER_SIZE);
 
         Some(Self {
             window,
             receiver,
-            max_image_size,
+            max_buffer_size,
         })
     }
 
-    pub fn max_image_size(&self) -> usize {
-        self.max_image_size
+    pub fn max_image_resolution(&self) -> usize {
+        self.max_buffer_size / RGBA_SIZE
     }
 
     pub fn process(&self, mut images: Vec<Arc<Path>>, config: &Config) -> Result<()> {

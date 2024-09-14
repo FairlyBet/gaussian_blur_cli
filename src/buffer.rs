@@ -30,7 +30,7 @@ impl<T> ImageBuffer<T> {
         // The subsequent code is valid OpenGL API calls
         // Returning pointer is checked not to be null
         // In case of calling from OpenGl context-less thread
-        // or not being able to create required objects will returns `None`
+        // or not being able to create required objects will return `None`
         unsafe {
             let mut buffer = 0;
             gl::GenBuffers(1, &mut buffer);
@@ -152,7 +152,7 @@ impl ImageBuffer<PersistentWrite> {
 impl<T> Drop for ImageBuffer<T> {
     fn drop(&mut self) {
         // SAFETY:
-        // Buffer and texture are guaranteed to exist
+        // Buffer and texture are guaranteed to exist,
         // so it is safe to delete it
         // Also if buffer was mapped the `ptr` value will be `Some`
         // so in this case it is valid to unmap it

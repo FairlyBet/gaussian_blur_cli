@@ -165,7 +165,7 @@ layout(std140, binding = {}) uniform ImageData {{
 
 impl Drop for BlurProgram {
     fn drop(&mut self) {
-        // Program existence is guaranteed so it is
+        // Program existence is guaranteed, so it is
         // safe to delete it
         unsafe {
             gl::DeleteProgram(self.program);
