@@ -269,7 +269,7 @@ impl Renderer {
             image_data_buffer.update(ImageData {
                 // Here we're dividing by RGBA_SIZE because we need offset
                 // of the whole Rbga pixel and not the particular byte
-                offset: (*offset / RGBA_SIZE) as i32,
+                pixel_offset: (*offset / RGBA_SIZE) as i32,
                 width: img.width as i32,
                 height: img.height as i32,
             });

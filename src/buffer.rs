@@ -28,9 +28,9 @@ impl<T> ImageBuffer<T> {
         let flags = flags | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT;
         // SAFETY:
         // The subsequent code is valid OpenGL API calls
-        // Returning pointer is checked to not be null
+        // Returning pointer is checked not to be null
         // In case of calling from OpenGl context-less thread
-        // or not being able to create required objects will return `None`
+        // or not being able to create required objects will returns `None`
         unsafe {
             let mut buffer = 0;
             gl::GenBuffers(1, &mut buffer);
@@ -94,7 +94,7 @@ impl ImageBuffer<Regular> {
                 return None;
             }
             gl::BindBuffer(Self::TARGET, buffer);
-            gl::BufferData(gl::TEXTURE_BUFFER, isize, ptr::null(), gl::DYNAMIC_DRAW);
+            gl::BufferData(Self::TARGET, isize, ptr::null(), gl::DYNAMIC_DRAW);
 
             let mut texture = 0;
             gl::GenTextures(1, &mut texture);
@@ -152,9 +152,9 @@ impl ImageBuffer<PersistentWrite> {
 impl<T> Drop for ImageBuffer<T> {
     fn drop(&mut self) {
         // SAFETY:
-        // Buffer and texture creation API guarantees their existence
+        // Buffer and texture are guaranteed to exist
         // so it is safe to delete it
-        // Also if buffer was mapped the `ptr` will be `Some` value
+        // Also if buffer was mapped the `ptr` value will be `Some`
         // so in this case it is valid to unmap it
         unsafe {
             gl::DeleteTextures(1, &self.texture);
@@ -180,9 +180,6 @@ impl<T> UniformBuffer<T> {
         let isize = mem::size_of::<T>().try_into().ok()?;
         // SAFETY:
         // The subsequent code is valid OpenGL API calls,
-        // provides correct values for functions,
-        // is memory-safe as providing pointer is created from
-        // a mutable reference which is valid by default
         // In case of calling from OpenGl context-less thread
         // or not being able to create required object will return `None`
         unsafe {
@@ -223,7 +220,6 @@ impl<T> UniformBuffer<T> {
     pub fn bind_buffer_base(&self, index: u32) {
         // SAFETY:
         // This is safe as providing `buffer` value is valid
-        // and guaranteed by its creation API
         unsafe {
             gl::BindBufferBase(Self::TARGET, index, self.buffer);
         }

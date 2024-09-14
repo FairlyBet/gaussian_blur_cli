@@ -6,7 +6,7 @@ use tracing::error;
 #[derive(Debug)]
 #[repr(C)]
 pub struct ImageData {
-    pub offset: i32,
+    pub pixel_offset: i32,
     pub width: i32,
     pub height: i32,
 }
@@ -22,15 +22,19 @@ impl BlurProgram {
     pub const MAX_BUFFER_SIZE: usize = i32::MAX as usize * RGBA_SIZE;
     pub const INPUT_BINDING_UNIT: u32 = 0;
     pub const OUTPUT_BINDING_UNIT: u32 = 1;
-    pub const IMAGE_DATA_BINDING_POINT: u32 = 2;
+    pub const IMAGE_DATA_BINDING_POINT: u32 = 0;
 
     pub fn new(context_version: Version, group_size: (u32, u32), kernel: &[f32]) -> Option<Self> {
         let src = Self::src(context_version, group_size, kernel);
         let shader = ComputeShader::new(&src)?;
         // SAFETY:
-        //
+        // This is safe as OpenGL calls are valid 
+        // 
         unsafe {
             let program = gl::CreateProgram();
+            if program == 0 {
+                return None;
+            }
             gl::AttachShader(program, shader.shader);
             gl::LinkProgram(program);
             let mut is_linked = 0;
@@ -42,10 +46,8 @@ impl BlurProgram {
             gl::UseProgram(program);
             let name = CString::new("direction").ok()?;
             let direction_location = gl::GetUniformLocation(program, name.as_ptr());
-
-            if direction_location == -1 {
-                return None;
-            }
+            // if this panics then the shader src is incorrect
+            assert_ne!(direction_location, -1);
 
             Some(Self {
                 program,
@@ -163,6 +165,8 @@ layout(std140, binding = {}) uniform ImageData {{
 
 impl Drop for BlurProgram {
     fn drop(&mut self) {
+        // Program existence is guaranteed so it is
+        // safe to delete it
         unsafe {
             gl::DeleteProgram(self.program);
         }
