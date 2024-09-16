@@ -51,7 +51,7 @@ impl Renderer {
         let mut glfw = glfw::init(fail_on_errors!()).ok()?;
         glfw.window_hint(WindowHint::ClientApi(ClientApiHint::OpenGl));
         glfw.window_hint(WindowHint::OpenGlProfile(OpenGlProfileHint::Core));
-        glfw.window_hint(WindowHint::ContextVersion(4, 3));
+        glfw.window_hint(WindowHint::ContextVersion(4, 4));
         glfw.window_hint(WindowHint::Visible(false));
         let (mut window, receiver) = glfw.create_window(1, 1, "", WindowMode::Windowed)?;
         gl::load_with(|symbol| window.get_proc_address(symbol));
