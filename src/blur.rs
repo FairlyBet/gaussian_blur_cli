@@ -99,13 +99,15 @@ impl Renderer {
 
         while !images.is_empty() {
             // SAFETY:
-            // It is safe because buffer usage is only writing
+            // It is safe because buffer is used only for writing
             // and it is not being used by GPU at this moment
             let buffer = unsafe { input_buffer.data() };
             let loaded_images = self.load_images(&mut images, buffer);
 
             // SAFETY:
-            //
+            // It is safe as providing `access` and `format`
+            // values are correct and corresponds to buffers usage 
+            // intended in the shader program.
             unsafe {
                 input_buffer.bind_image_texture(
                     BlurProgram::INPUT_BINDING_UNIT,
@@ -119,7 +121,9 @@ impl Renderer {
                 );
             }
             program.set_horizontal();
-            Self::render(&loaded_images, &mut image_data, &program);
+            unsafe {
+                program.dispath_compute(&loaded_images, &mut image_data);
+            }
 
             // SAFETY:
             //
@@ -136,7 +140,9 @@ impl Renderer {
                 );
             }
             program.set_vertical();
-            Self::render(&loaded_images, &mut image_data, &program);
+            unsafe {
+                program.dispath_compute(&loaded_images, &mut image_data);
+            }
 
             // SAFETY:
             // This is just safe :)
@@ -167,10 +173,19 @@ impl Renderer {
         let mut loaded_images = vec![];
         let mut offset = 0;
         let mut i = 0;
+        // This loop tries to load as many immages as possible
+        // into working buffer at once. If image size is bigger
+        // than size of the buffer then error message is printed and image
+        // is removed from images queue. Otherwise it is either loaded
+        // or if buffer is too full and can't hold the image at the moment
+        // it is skipped until next iteration of this function
         while i < images.len() {
             let path = images[i].clone();
             match Self::try_load(path.clone(), buffer, working_buffer_size) {
                 Ok(info) => {
+                    // If image is loaded successfuly then the offset of this
+                    // image in buffer is calculated and saved alongside with
+                    // the image info
                     buffer = buffer.split_at_mut(info.rgba_size).1;
                     let size = info.rgba_size;
                     loaded_images.push((info, offset));
@@ -234,6 +249,8 @@ impl Renderer {
     fn read_image(decoder: Decoder, buffer: &mut [u8]) -> Result<()> {
         match decoder.color_type() {
             ColorType::Rgb8 => {
+                // Assumes that convertion is valid
+                // and rgba-size of image and size of buffer are equal
                 let size = decoder.total_bytes() as usize;
                 // Creating an uninitialized buffer for image reading
                 let mut image_buf = Vec::with_capacity(size);
@@ -243,9 +260,9 @@ impl Renderer {
 
                 decoder.read_image(&mut image_buf)?;
 
-                // This code copies image to GPU memory converting RGB to RGBA
-                // without setting the Alpha component, so it is
-                // some random value from memory
+                // This code copies image to GPU memory effectively
+                // converting RGB to RGBA without setting the Alpha
+                // component, so it is some random value from memory
                 buffer
                     .par_chunks_exact_mut(RGBA_SIZE)
                     .enumerate()
@@ -258,32 +275,6 @@ impl Renderer {
             _ => unreachable!(),
         }
         Ok(())
-    }
-
-    fn render(
-        loaded_images: &Vec<(ImageInfo, usize)>,
-        image_data_buffer: &mut UniformBuffer<ImageData>,
-        program: &BlurProgram,
-    ) {
-        for (img, offset) in loaded_images {
-            image_data_buffer.update(ImageData {
-                // Here we're dividing by RGBA_SIZE because we need offset
-                // of the whole Rbga pixel and not the particular byte
-                pixel_offset: (*offset / RGBA_SIZE) as i32,
-                width: img.width as i32,
-                height: img.height as i32,
-            });
-
-            // SAFETY:
-            //
-            unsafe {
-                gl::DispatchCompute(
-                    img.width.div_ceil(program.group_size().0),
-                    img.height.div_ceil(program.group_size().1),
-                    1,
-                );
-            }
-        }
     }
 
     fn save_images(buffer: &[u8], infos: &[(ImageInfo, usize)], output_dir: &Path) {
@@ -390,11 +381,11 @@ pub type Decoder = Box<dyn ImageDecoder>;
 
 #[derive(Debug)]
 pub struct ImageInfo {
-    path: Arc<Path>,
-    width: u32,
-    height: u32,
-    color_type: ColorType,
-    rgba_size: usize,
+    pub path: Arc<Path>,
+    pub width: u32,
+    pub height: u32,
+    pub color_type: ColorType,
+    pub rgba_size: usize,
 }
 
 #[derive(Debug, Parser, Deserialize)]
@@ -412,7 +403,7 @@ impl Config {
             conf = conf.add_source(config::File::with_name(&path));
         }
         let ret = conf
-            .add_source(Environment::with_prefix("BLUR"))
+            .add_source(Environment::with_prefix("GBLUR"))
             .add_source(config::File::from_str(
                 &toml::to_string(args)?,
                 config::FileFormat::Toml,

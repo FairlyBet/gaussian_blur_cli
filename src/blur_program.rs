@@ -1,4 +1,7 @@
-use crate::blur::RGBA_SIZE;
+use crate::{
+    blur::{ImageInfo, RGBA_SIZE},
+    buffer::UniformBuffer,
+};
 use glfw::Version;
 use std::{ffi::CString, marker::PhantomData};
 use tracing::error;
@@ -28,8 +31,8 @@ impl BlurProgram {
         let src = Self::src(context_version, group_size, kernel);
         let shader = ComputeShader::new(&src)?;
         // SAFETY:
-        // This is safe as OpenGL calls are valid 
-        // 
+        // This is safe as OpenGL calls are valid
+        //
         unsafe {
             let program = gl::CreateProgram();
             if program == 0 {
@@ -159,6 +162,39 @@ layout(std140, binding = {}) uniform ImageData {{
         self.use_();
         unsafe {
             gl::ProgramUniform2i(self.program, self.direction_location, 0, 1);
+        }
+    }
+
+    /// ### SAFETY:
+    ///
+    /// The `use` method must be called before this method.
+    /// Caller must ensure to correctly bind buffers
+    /// with data that corresponds to information provided
+    /// in `loaded_images`
+    pub unsafe fn dispath_compute(
+        &self,
+        loaded_images: &Vec<(ImageInfo, usize)>,
+        image_data_buffer: &mut UniformBuffer<ImageData>,
+    ) {
+        for (img, offset) in loaded_images {
+            image_data_buffer.update(ImageData {
+                // Here we're dividing by RGBA_SIZE because we need offset
+                // of the whole RGBA pixel and not the particular byte
+                pixel_offset: (*offset / RGBA_SIZE) as i32,
+                width: img.width as i32,
+                height: img.height as i32,
+            });
+
+            // SAFETY:
+            // Assumes that the program is being used
+            // and the data used in shader is valid and provided correctly
+            unsafe {
+                gl::DispatchCompute(
+                    img.width.div_ceil(self.group_size().0),
+                    img.height.div_ceil(self.group_size().1),
+                    1,
+                );
+            }
         }
     }
 }
