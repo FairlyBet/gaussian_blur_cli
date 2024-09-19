@@ -251,7 +251,7 @@ impl<T: Copy> UniformBuffer<T> {
 impl<T> Drop for UniformBuffer<T> {
     fn drop(&mut self) {
         // SAFETY:
-        // As buffer existence is guaranteed by its creation API
+        // As buffer existence is guaranteed
         // it is safe to delete it
         unsafe {
             gl::DeleteBuffers(1, &self.buffer);

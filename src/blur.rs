@@ -106,8 +106,8 @@ impl Renderer {
 
             // SAFETY:
             // It is safe as providing `access` and `format`
-            // values are correct and corresponds to buffers usage 
-            // intended in the shader program.
+            // values are correct and corresponds to buffers usage
+            // as intended in the shader program.
             unsafe {
                 input_buffer.bind_image_texture(
                     BlurProgram::INPUT_BINDING_UNIT,
@@ -121,12 +121,18 @@ impl Renderer {
                 );
             }
             program.set_horizontal();
+            // It is safe as all the data used by the
+            // shader is valid and set correctly and the `use`
+            // method is called. Also `loaded_images` corresponds
+            // to data in image buffers that are bound at the moment
             unsafe {
                 program.dispath_compute(&loaded_images, &mut image_data);
             }
 
             // SAFETY:
-            //
+            // It is safe as providing `access` and `format`
+            // values are correct and corresponds to buffers usage
+            // as intended in the shader program.
             unsafe {
                 intermediate_buffer.bind_image_texture(
                     BlurProgram::INPUT_BINDING_UNIT,
@@ -140,14 +146,19 @@ impl Renderer {
                 );
             }
             program.set_vertical();
+            // It is safe as all the data used by the
+            // shader is valid and set correctly and the `use`
+            // method is called. Also `loaded_images` corresponds
+            // to data in image buffers that are bound at the moment
             unsafe {
                 program.dispath_compute(&loaded_images, &mut image_data);
             }
 
             // SAFETY:
-            // This is just safe :)
-            // Ensuring that GPU performs all the queried commands
-            //
+            // At this moment the GPU command buffer is
+            // fulled with render commands so we have to
+            // wait util all job is done before proceed to
+            // image saving
             unsafe {
                 gl::Finish();
             }

@@ -31,8 +31,9 @@ impl BlurProgram {
         let src = Self::src(context_version, group_size, kernel);
         let shader = ComputeShader::new(&src)?;
         // SAFETY:
-        // This is safe as OpenGL calls are valid
-        //
+        // This code is valid OpenGL calls
+        // Returned from OpenGL values are checked to be
+        // valid.
         unsafe {
             let program = gl::CreateProgram();
             if program == 0 {
@@ -146,6 +147,8 @@ layout(std140, binding = {}) uniform ImageData {{
     }
 
     pub fn use_(&self) {
+        // It is safe as program object exist 
+        // and guranteed to be valid
         unsafe {
             gl::UseProgram(self.program);
         }
@@ -153,6 +156,9 @@ layout(std140, binding = {}) uniform ImageData {{
 
     pub fn set_horizontal(&self) {
         self.use_();
+        // It is safe as location of `direction` uniform 
+        // and providing value is valid and corresponds to
+        // shader program
         unsafe {
             gl::ProgramUniform2i(self.program, self.direction_location, 1, 0);
         }
@@ -160,6 +166,9 @@ layout(std140, binding = {}) uniform ImageData {{
 
     pub fn set_vertical(&self) {
         self.use_();
+        // It is safe as location of `direction` uniform 
+        // and providing value is valid and correspnds to
+        // shader program
         unsafe {
             gl::ProgramUniform2i(self.program, self.direction_location, 0, 1);
         }
@@ -216,6 +225,8 @@ struct ComputeShader {
 
 impl ComputeShader {
     fn new(src: &str) -> Option<Self> {
+        // SAFETY:
+        // 
         unsafe {
             let shader = gl::CreateShader(gl::COMPUTE_SHADER);
             if shader == 0 {
@@ -255,6 +266,8 @@ impl ComputeShader {
 }
 
 impl Drop for ComputeShader {
+    // Shader existence is guaranteed, so it is
+    // safe to delete it
     fn drop(&mut self) {
         unsafe {
             gl::DeleteShader(self.shader);
