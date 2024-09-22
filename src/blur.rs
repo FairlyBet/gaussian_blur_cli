@@ -99,7 +99,7 @@ impl Renderer {
 
         while !images.is_empty() {
             // SAFETY:
-            // It is safe because buffer is used only for writing
+            // It is safe because buffer is used only for writing,
             // and it is not being used by OpenGL at this moment
             let buffer = unsafe { input_buffer.data() };
             let loaded_images = self.load_images(&mut images, buffer);
@@ -127,7 +127,7 @@ impl Renderer {
             // method is called. Also `loaded_images` corresponds
             // to data in image buffers that are bound at the moment
             unsafe {
-                program.dispath_compute(&loaded_images, &mut image_data);
+                program.dispatch_compute(&loaded_images, &mut image_data);
             }
 
             // SAFETY:
@@ -153,14 +153,14 @@ impl Renderer {
             // method is called. Also `loaded_images` corresponds
             // to data in image buffers that are bound at the moment
             unsafe {
-                program.dispath_compute(&loaded_images, &mut image_data);
+                program.dispatch_compute(&loaded_images, &mut image_data);
             }
 
             // SAFETY:
             // This call is basically safe and lead to 
             // no error or UB.
             // At this moment the GPU command buffer is
-            // filled with render commands so we have to
+            // filled with render commands, so we have to
             // wait util all job is done before proceed to
             // image saving
             unsafe {
@@ -192,17 +192,17 @@ impl Renderer {
         let mut loaded_images = vec![];
         let mut offset = 0;
         let mut i = 0;
-        // This loop tries to load as many immages as possible
+        // This loop tries to load as many images as possible
         // into working buffer at once. If image size is bigger
         // than size of the buffer then error message is printed and image
-        // is removed from images queue. Otherwise it is either loaded
+        // is removed from images queue. Otherwise, it is either loaded
         // or if buffer is too full and can't hold the image at the moment
         // it is skipped until next iteration of this function
         while i < images.len() {
             let path = images[i].clone();
             match Self::try_load(path.clone(), buffer, working_buffer_size) {
                 Ok(info) => {
-                    // If image is loaded successfuly then the offset of this
+                    // If image is loaded successfully then the offset of this
                     // image in buffer is calculated and saved alongside with
                     // the image info
                     buffer = buffer.split_at_mut(info.rgba_size).1;
@@ -268,7 +268,7 @@ impl Renderer {
     fn read_image(decoder: Decoder, buffer: &mut [u8]) -> Result<()> {
         match decoder.color_type() {
             ColorType::Rgb8 => {
-                // Assumes that convertion is valid
+                // Assumes that conversion is valid
                 // and rgba-size of image and size of buffer are equal
                 let size = decoder.total_bytes() as usize;
                 // Creating an uninitialized buffer for image reading

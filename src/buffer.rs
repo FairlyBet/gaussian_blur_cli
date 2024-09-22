@@ -154,7 +154,7 @@ impl<T> Drop for ImageBuffer<T> {
         // SAFETY:
         // `self.buffer` and `self.texture` are valid values,
         // so it is safe to delete them.
-        // Also if buffer was mapped the `ptr` value will be `Some`
+        // Also, if buffer was mapped the `ptr` value will be `Some`
         // so in this case it is safe to unmap it
         unsafe {
             gl::DeleteTextures(1, &self.texture);

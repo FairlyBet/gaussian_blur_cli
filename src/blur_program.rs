@@ -181,7 +181,7 @@ layout(std140, binding = {}) uniform ImageData {{
     /// Caller must ensure to correctly bind buffers
     /// with data that corresponds to information provided
     /// in `loaded_images`
-    pub unsafe fn dispath_compute(
+    pub unsafe fn dispatch_compute(
         &self,
         loaded_images: &Vec<(ImageInfo, usize)>,
         image_data_buffer: &mut UniformBuffer<ImageData>,
