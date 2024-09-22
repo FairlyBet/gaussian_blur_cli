@@ -100,7 +100,7 @@ impl Renderer {
         while !images.is_empty() {
             // SAFETY:
             // It is safe because buffer is used only for writing
-            // and it is not being used by GPU at this moment
+            // and it is not being used by OpenGL at this moment
             let buffer = unsafe { input_buffer.data() };
             let loaded_images = self.load_images(&mut images, buffer);
 
@@ -121,6 +121,7 @@ impl Renderer {
                 );
             }
             program.set_horizontal();
+            // SAFETY:
             // It is safe as all the data used by the
             // shader is valid and set correctly and the `use`
             // method is called. Also `loaded_images` corresponds
@@ -146,6 +147,7 @@ impl Renderer {
                 );
             }
             program.set_vertical();
+            // SAFETY:
             // It is safe as all the data used by the
             // shader is valid and set correctly and the `use`
             // method is called. Also `loaded_images` corresponds
@@ -155,8 +157,10 @@ impl Renderer {
             }
 
             // SAFETY:
+            // This call is basically safe and lead to 
+            // no error or UB.
             // At this moment the GPU command buffer is
-            // fulled with render commands so we have to
+            // filled with render commands so we have to
             // wait util all job is done before proceed to
             // image saving
             unsafe {
@@ -164,6 +168,10 @@ impl Renderer {
             }
 
             Self::save_images(
+                // SAFETY:
+                // The buffer is not being used
+                // by OpenGL at this moment os it is
+                // safe to read from it
                 unsafe { output_buffer.data() },
                 &loaded_images,
                 &config.output_dir,
@@ -267,7 +275,10 @@ impl Renderer {
                 let mut image_buf = Vec::with_capacity(size);
                 // SAFETY:
                 // This is safe as `image_buf` is created with capacity of `size`
-                unsafe { image_buf.set_len(size) }
+                #[allow(clippy::uninit_vec)]
+                unsafe { 
+                    image_buf.set_len(size);
+                }
 
                 decoder.read_image(&mut image_buf)?;
 

@@ -27,7 +27,7 @@ impl<T> ImageBuffer<T> {
         let isize = size.try_into().ok()?;
         let flags = flags | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT;
         // SAFETY:
-        // The subsequent code is valid OpenGL API calls
+        // The subsequent code is valid OpenGL calls
         // Returning pointer is checked not to be null
         // In case of calling from OpenGl context-less thread
         // or not being able to create required objects will return `None`
@@ -70,8 +70,8 @@ impl<T> ImageBuffer<T> {
     /// will not cause errors and will be just ignored
     pub unsafe fn bind_image_texture(&self, unit: u32, access: u32, format: u32) {
         // SAFETY:
-        // The subsequent code is valid OpenGL calls, provides correct
-        // values such as `texture`, `buffer`, `TARGET`
+        // The subsequent code is valid OpenGL calls, assumes that 
+        // `access` and `format` values are correct
         unsafe {
             gl::BindTexture(Self::TARGET, self.texture);
             gl::TexBuffer(Self::TARGET, format, self.buffer);
@@ -124,8 +124,8 @@ impl ImageBuffer<PersistentRead> {
     /// cause data races and unpredictable results
     pub unsafe fn data(&self) -> &[u8] {
         // SAFETY:
-        // It is safe because inner buffer exists as long as `self`
-        // and the pointer is guaranteed to be valid
+        // It is safe because inner buffer exists as long as `self`,
+        // mapped persistently for reading and `self.ptr` is valid
         unsafe { slice::from_raw_parts(self.ptr.unwrap().as_ptr(), self.size) }
     }
 }
@@ -143,8 +143,8 @@ impl ImageBuffer<PersistentWrite> {
     /// cause data races and unpredictable result
     pub unsafe fn data(&mut self) -> &mut [u8] {
         // SAFETY:
-        // It is safe because inner buffer exists as long as `self`
-        // and the pointer is guaranteed to be valid
+        // It is safe because inner buffer exists as long as `self`,
+        // mapped persistently for writing and `self.ptr` is valid
         unsafe { slice::from_raw_parts_mut(self.ptr.unwrap().as_ptr(), self.size) }
     }
 }
@@ -152,14 +152,14 @@ impl ImageBuffer<PersistentWrite> {
 impl<T> Drop for ImageBuffer<T> {
     fn drop(&mut self) {
         // SAFETY:
-        // Buffer and texture are guaranteed to exist,
-        // so it is safe to delete it
+        // `self.buffer` and `self.texture` are valid values,
+        // so it is safe to delete them.
         // Also if buffer was mapped the `ptr` value will be `Some`
-        // so in this case it is valid to unmap it
+        // so in this case it is safe to unmap it
         unsafe {
             gl::DeleteTextures(1, &self.texture);
 
-            if let Some(_) = self.ptr {
+            if self.ptr.is_some() {
                 gl::BindBuffer(Self::TARGET, self.buffer);
                 gl::UnmapBuffer(Self::TARGET);
             }
@@ -179,7 +179,7 @@ impl<T> UniformBuffer<T> {
     pub fn new() -> Option<Self> {
         let isize = mem::size_of::<T>().try_into().ok()?;
         // SAFETY:
-        // The subsequent code is valid OpenGL API calls,
+        // The subsequent code is valid OpenGL calls,
         // In case of calling from OpenGl context-less thread
         // or not being able to create required object will return `None`
         unsafe {
@@ -251,7 +251,7 @@ impl<T: Copy> UniformBuffer<T> {
 impl<T> Drop for UniformBuffer<T> {
     fn drop(&mut self) {
         // SAFETY:
-        // As buffer existence is guaranteed
+        // As `self.buffer` is valid buffer id
         // it is safe to delete it
         unsafe {
             gl::DeleteBuffers(1, &self.buffer);

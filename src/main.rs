@@ -1,3 +1,5 @@
+#![deny(clippy::undocumented_unsafe_blocks)]
+
 mod blur;
 mod blur_program;
 mod buffer;

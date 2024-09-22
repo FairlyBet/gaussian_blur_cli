@@ -22,6 +22,7 @@ pub struct BlurProgram {
 }
 
 impl BlurProgram {
+    // Multiplied by `RGBA_SIZE` because every pixel is 4 byte long
     pub const MAX_BUFFER_SIZE: usize = i32::MAX as usize * RGBA_SIZE;
     pub const INPUT_BINDING_UNIT: u32 = 0;
     pub const OUTPUT_BINDING_UNIT: u32 = 1;
@@ -41,6 +42,7 @@ impl BlurProgram {
             }
             gl::AttachShader(program, shader.shader);
             gl::LinkProgram(program);
+
             let mut is_linked = 0;
             gl::GetProgramiv(program, gl::LINK_STATUS, &mut is_linked);
             if is_linked == gl::FALSE as i32 {
@@ -142,13 +144,10 @@ layout(std140, binding = {}) uniform ImageData {{
         kernel_size + &kernel
     }
 
-    pub fn group_size(&self) -> (u32, u32) {
-        self.group_size
-    }
-
     pub fn use_(&self) {
-        // It is safe as program object exist 
-        // and guranteed to be valid
+        // SAFETY:
+        // It is safe as `self.program` is
+        // valid program object id
         unsafe {
             gl::UseProgram(self.program);
         }
@@ -156,8 +155,9 @@ layout(std140, binding = {}) uniform ImageData {{
 
     pub fn set_horizontal(&self) {
         self.use_();
-        // It is safe as location of `direction` uniform 
-        // and providing value is valid and corresponds to
+        // SAFETY:
+        // It is safe as location of `direction` uniform
+        // and providing values are valid and corresponds to
         // shader program
         unsafe {
             gl::ProgramUniform2i(self.program, self.direction_location, 1, 0);
@@ -166,8 +166,9 @@ layout(std140, binding = {}) uniform ImageData {{
 
     pub fn set_vertical(&self) {
         self.use_();
-        // It is safe as location of `direction` uniform 
-        // and providing value is valid and correspnds to
+        // SAFETY:
+        // It is safe as location of `direction` uniform
+        // and providing values are valid and corresponds to
         // shader program
         unsafe {
             gl::ProgramUniform2i(self.program, self.direction_location, 0, 1);
@@ -199,8 +200,8 @@ layout(std140, binding = {}) uniform ImageData {{
             // and the data used in shader is valid and provided correctly
             unsafe {
                 gl::DispatchCompute(
-                    img.width.div_ceil(self.group_size().0),
-                    img.height.div_ceil(self.group_size().1),
+                    img.width.div_ceil(self.group_size.0),
+                    img.height.div_ceil(self.group_size.1),
                     1,
                 );
             }
@@ -210,8 +211,9 @@ layout(std140, binding = {}) uniform ImageData {{
 
 impl Drop for BlurProgram {
     fn drop(&mut self) {
-        // Program existence is guaranteed, so it is
-        // safe to delete it
+        // SAFETY:
+        // It is safe because `self.program` is
+        // valid shader program object id
         unsafe {
             gl::DeleteProgram(self.program);
         }
@@ -226,17 +228,31 @@ struct ComputeShader {
 impl ComputeShader {
     fn new(src: &str) -> Option<Self> {
         // SAFETY:
-        // 
-        unsafe {
+        // This code is valid OpenGL calls
+        // Returned from OpenGL values are checked to be
+        // valid.
+        let shader = unsafe {
             let shader = gl::CreateShader(gl::COMPUTE_SHADER);
             if shader == 0 {
                 return None;
             }
             let src = CString::new(src).ok()?;
-            let src_len: i32 = src.count_bytes().try_into().ok()?;
+            let src_len = src.count_bytes().try_into().ok()?;
             gl::ShaderSource(shader, 1, &src.as_ptr(), &src_len);
             gl::CompileShader(shader);
+            shader
+        };
 
+        // SAFETY:
+        // This code is valid OpenGL calls.
+        // It tries to receive info log about
+        // shader compilation in case of unsuccessful
+        // compilation. In order to do it `gl::GetShaderInfoLog`
+        // has to receive pointer to buffer where info text will be written.
+        // Amount of written bytes is set to `written_len` variable. All numeric values
+        // are converted with `try_into` and also `written_len` is checked to be equal or less
+        // than char buffer capacity. Then `chars` len is set to amount of written chars
+        unsafe {
             let mut is_compiled = 0;
             gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut is_compiled);
 
@@ -254,21 +270,23 @@ impl ComputeShader {
                 assert!(written_len <= len);
                 chars.set_len(written_len.try_into().unwrap());
                 error!("{}", String::from_utf8_lossy(&chars));
+                
                 return None;
             }
-
-            Some(Self {
-                shader,
-                _marker: PhantomData,
-            })
         }
+
+        Some(Self {
+            shader,
+            _marker: PhantomData,
+        })
     }
 }
 
 impl Drop for ComputeShader {
-    // Shader existence is guaranteed, so it is
-    // safe to delete it
     fn drop(&mut self) {
+        // SAFETY:
+        // It is safe because `self.shader` is
+        // valid shader object id
         unsafe {
             gl::DeleteShader(self.shader);
         }
