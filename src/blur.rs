@@ -161,7 +161,7 @@ impl Renderer {
             }
 
             // SAFETY:
-            // This call is basically safe and lead to 
+            // This call is basically safe and lead to
             // no error or UB.
             // At this moment the GPU command buffer is
             // filled with render commands, so we have to
@@ -280,7 +280,7 @@ impl Renderer {
                 // SAFETY:
                 // This is safe as `image_buf` is created with capacity of `size`
                 #[allow(clippy::uninit_vec)]
-                unsafe { 
+                unsafe {
                     image_buf.set_len(size);
                 }
 
@@ -425,7 +425,7 @@ pub struct Config {
 impl Config {
     pub fn new(args: &Args) -> Result<Self> {
         let mut conf = config::Config::builder();
-        if let Ok(path) = env::var("BLUR_CONF") {
+        if let Ok(path) = env::var("GBLUR") {
             conf = conf.add_source(config::File::with_name(&path));
         }
         let ret = conf
