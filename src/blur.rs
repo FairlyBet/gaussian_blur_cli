@@ -76,6 +76,10 @@ impl Renderer {
         self.max_buffer_size / RGBA_SIZE
     }
 
+    pub fn max_buffer_size(&self) -> usize {
+        self.max_buffer_size
+    }
+
     pub fn process(&self, mut images: Vec<Arc<Path>>, config: &Config) -> Result<()> {
         let kernel = gaussian_kernel(config.sigma);
         let program = BlurProgram::new(

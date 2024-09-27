@@ -53,6 +53,12 @@ fn main() {
                     renderer.max_image_resolution()
                 );
             }
+            if args.max_buffer_size {
+                println!(
+                    "Maximum size of a working buffer is {} bytes",
+                    renderer.max_buffer_size()
+                );
+            }
             if let Err(e) = renderer.process(paths, &config) {
                 error!("{e}");
             }
@@ -67,9 +73,11 @@ pub struct Args {
     images: Vec<PathBuf>,
     #[arg(
         short,
-        help = "Print maximum resolution of an image that can be processed"
+        help = "Print maximum resolution of an image that can be processed, if the buffer is set to maximum size"
     )]
     max_image_resolution: bool,
+    #[arg(short = 'b', help = "Print maximum size of a working buffer")]
+    max_buffer_size: bool,
     #[arg(
         short,
         value_name = "NUM",
