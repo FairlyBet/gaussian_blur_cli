@@ -154,8 +154,8 @@ impl Renderer {
             // SAFETY:
             // It is safe as all the data used by the
             // shader is valid and set correctly and the `use`
-            // method is called. Also `loaded_images` corresponds
-            // to data in image buffers that are bound at the moment
+            // method is called. Also `loaded_images` info corresponds
+            // to data in image buffer that are bound at the moment
             unsafe {
                 program.dispatch_compute(&loaded_images, &mut image_data);
             }
@@ -165,7 +165,7 @@ impl Renderer {
             // no error or UB.
             // At this moment the GPU command buffer is
             // filled with render commands, so we have to
-            // wait util all job is done before proceed to
+            // wait until all the job is done before proceeding to
             // image saving
             unsafe {
                 gl::Finish();
