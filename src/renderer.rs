@@ -1,6 +1,6 @@
 use crate::{
     blur_program::{BlurProgram, ImageData},
-    buffer::{ImageBuffer, UniformBuffer},
+    buffers::{ImageBuffer, UniformBuffer},
     Args,
 };
 use anyhow::{anyhow, Result};

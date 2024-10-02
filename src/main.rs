@@ -1,7 +1,7 @@
 #![deny(clippy::undocumented_unsafe_blocks)]
 
 mod blur_program;
-mod buffer;
+mod buffers;
 mod renderer;
 
 use clap::Parser;

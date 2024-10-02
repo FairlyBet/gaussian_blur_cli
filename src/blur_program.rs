@@ -1,5 +1,5 @@
 use crate::{
-    buffer::UniformBuffer,
+    buffers::UniformBuffer,
     renderer::{ImageInfo, RGBA_SIZE},
 };
 use glfw::Version;
