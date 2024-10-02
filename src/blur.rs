@@ -423,13 +423,15 @@ pub struct Config {
 }
 
 impl Config {
+    const PREF: &str = "GBLUR";
+
     pub fn new(args: &Args) -> Result<Self> {
         let mut conf = config::Config::builder();
-        if let Ok(path) = env::var("GBLUR") {
+        if let Ok(path) = env::var(Self::PREF) {
             conf = conf.add_source(config::File::with_name(&path));
         }
         let ret = conf
-            .add_source(Environment::with_prefix("GBLUR"))
+            .add_source(Environment::with_prefix(Self::PREF))
             .add_source(config::File::from_str(
                 &toml::to_string(args)?,
                 config::FileFormat::Toml,

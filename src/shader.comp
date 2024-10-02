@@ -2,7 +2,7 @@
 // The actual shader code is produced in runtime based
 // on `group_size` and `kernel` values
 
-#version 430 core
+#version 440 core
 
 layout(local_size_x = 2, local_size_y = 2) in;
 layout(binding = 0, rgba8) restrict readonly uniform imageBuffer input_image;

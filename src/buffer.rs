@@ -70,7 +70,7 @@ impl<T> ImageBuffer<T> {
     /// will not cause errors and will be just ignored
     pub unsafe fn bind_image_texture(&self, unit: u32, access: u32, format: u32) {
         // SAFETY:
-        // The subsequent code is valid OpenGL calls, assumes that 
+        // The subsequent code is valid OpenGL calls, assumes that
         // `access` and `format` values are correct
         unsafe {
             gl::BindTexture(Self::TARGET, self.texture);
