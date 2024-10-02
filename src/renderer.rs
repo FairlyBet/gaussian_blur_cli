@@ -198,10 +198,10 @@ impl Renderer {
         let mut i = 0;
         // This loop tries to load as many images as possible
         // into working buffer at once. If image size is bigger
-        // than size of the buffer then error message is printed and image
-        // is removed from images queue. Otherwise, it is either loaded
-        // or if buffer is too full and can't hold the image at the moment
-        // it is skipped until next iteration of this function
+        // than size of the entire buffer then error message is printed and image
+        // is removed from input list and won't be processed. Otherwise, it is either loaded
+        // or if the buffer is too full and can't hold the image at the moment,
+        // then it is skipped until next iteration of this function
         while i < images.len() {
             let path = images[i].clone();
             match Self::try_load(path.clone(), buffer, working_buffer_size) {
@@ -221,7 +221,7 @@ impl Renderer {
                         _ = images.remove(i);
                     }
                     LoadError::DecoderError(e) => {
-                        error!("{e}");
+                        error!("Can't decode image at {path:?}: {e}");
                         _ = images.remove(i);
                     }
                     LoadError::NoSpaceLeft => i += 1,

@@ -1,11 +1,11 @@
 #![deny(clippy::undocumented_unsafe_blocks)]
 
-mod blur;
 mod blur_program;
 mod buffer;
+mod renderer;
 
-use blur::{Config, Renderer};
 use clap::Parser;
+use renderer::{Config, Renderer};
 use serde::Serialize;
 use std::{fs, path::PathBuf, sync::Arc};
 use tracing::error;

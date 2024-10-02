@@ -1,6 +1,6 @@
 use crate::{
-    blur::{ImageInfo, RGBA_SIZE},
     buffer::UniformBuffer,
+    renderer::{ImageInfo, RGBA_SIZE},
 };
 use glfw::Version;
 use std::{ffi::CString, marker::PhantomData};
@@ -270,7 +270,7 @@ impl ComputeShader {
                 assert!(written_len <= len);
                 chars.set_len(written_len.try_into().unwrap());
                 error!("{}", String::from_utf8_lossy(&chars));
-                
+
                 return None;
             }
         }
