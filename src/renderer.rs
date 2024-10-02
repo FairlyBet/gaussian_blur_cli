@@ -304,7 +304,7 @@ impl Renderer {
                         Rgb([buffer[pos], buffer[pos + 1], buffer[pos + 2]])
                     });
                     if let Err(e) = img.save(&path) {
-                        error!("{e}");
+                        error!("Can't save image at {path:?}: {e}");
                     }
                 }
                 ColorType::Rgba8 => {
@@ -318,7 +318,7 @@ impl Renderer {
                         ])
                     });
                     if let Err(e) = img.save(&path) {
-                        error!("{e}");
+                        error!("Can't save image at {path:?}: {e}");
                     }
                 }
                 _ => unreachable!(),

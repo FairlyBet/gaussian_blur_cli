@@ -43,7 +43,7 @@ fn main() {
                 );
             }
             if let Err(e) = renderer.process(paths, &config) {
-                error!("{e}");
+                error!("Error during processing: {e}");
             }
         }
         _ => error!("Can't create OpenGL context"),
