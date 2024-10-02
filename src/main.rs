@@ -5,7 +5,7 @@ mod buffers;
 mod renderer;
 
 use clap::Parser;
-use renderer::{Config, Renderer};
+use renderer::{config::Config, Renderer};
 use serde::Serialize;
 use std::{fs, path::PathBuf, sync::Arc};
 use tracing::error;

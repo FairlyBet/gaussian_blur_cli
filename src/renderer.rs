@@ -1,40 +1,28 @@
+use self::config::Config;
 use crate::{
     blur_program::{BlurProgram, ImageData},
     buffers::{ImageBuffer, UniformBuffer},
-    Args,
 };
 use anyhow::{anyhow, Result};
-use clap::Parser;
-use config::Environment;
 use glfw::{
     fail_on_errors, ClientApiHint, GlfwReceiver, OpenGlProfileHint, PWindow, WindowEvent,
     WindowHint, WindowMode,
 };
-use image::{
-    codecs::{
-        bmp::BmpDecoder, jpeg::JpegDecoder, png::PngDecoder, tga::TgaDecoder, tiff::TiffDecoder,
-        webp::WebPDecoder,
-    },
-    ColorType, ImageDecoder, ImageFormat, Limits, Rgb, RgbImage, Rgba, RgbaImage,
-};
+use image::{ColorType, ImageDecoder as _, Rgb, RgbImage, Rgba, RgbaImage};
 use rayon::{
     iter::{IndexedParallelIterator as _, ParallelIterator as _},
     slice::ParallelSliceMut as _,
 };
-use serde::Deserialize;
 use std::{
-    env,
     error::Error,
-    f32,
     ffi::OsStr,
     fmt::{Display, Formatter},
-    fs::File,
-    io::BufReader,
-    path::{Path, PathBuf},
+    path::Path,
     result,
     sync::Arc,
 };
 use tracing::error;
+use utils::{gaussian_kernel, get_decoder, rgb_size_to_rgba_size, Decoder};
 
 pub const RGB_SIZE: usize = 3;
 pub const RGBA_SIZE: usize = 4;
@@ -239,7 +227,7 @@ impl Renderer {
         match get_decoder(&path) {
             Ok(decoder) => {
                 let size = match decoder.color_type() {
-                    ColorType::Rgb8 => self::rgb_size_to_rgba_size(decoder.total_bytes())
+                    ColorType::Rgb8 => rgb_size_to_rgba_size(decoder.total_bytes())
                         .ok_or(LoadError::TooLargeImage)?,
                     ColorType::Rgba8 => decoder.total_bytes(),
                     // Currently only RGB8 and RGBA8 are supported
@@ -359,53 +347,6 @@ impl Display for LoadError {
 
 impl Error for LoadError {}
 
-fn gaussian_kernel(sigma: f32) -> Vec<f32> {
-    let size = 6 * sigma as usize + 1;
-    let mut kernel = Vec::with_capacity(size);
-    let half_size = (size / 2) as isize;
-    let sigma2 = sigma * sigma;
-    let normalization_factor = 1.0 / (2.0 * f32::consts::PI * sigma2).sqrt();
-    let mut sum = 0.0;
-
-    for i in -half_size..=half_size {
-        let value = normalization_factor * (-((i * i) as f32) / (2.0 * sigma2)).exp();
-        kernel.push(value);
-        sum += value;
-    }
-
-    (0..size).for_each(|i| {
-        kernel[i] /= sum;
-    });
-
-    kernel
-}
-
-fn rgb_size_to_rgba_size(rbg_size: u64) -> Option<u64> {
-    rbg_size.checked_add(rbg_size / 3)
-}
-
-fn get_decoder(path: &Path) -> Result<Decoder> {
-    let format = ImageFormat::from_path(path)?;
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let decoder: Decoder = match format {
-        ImageFormat::Png => Box::new(PngDecoder::with_limits(reader, Limits::default())?),
-        ImageFormat::Jpeg => Box::new(JpegDecoder::new(reader)?),
-        ImageFormat::WebP => Box::new(WebPDecoder::new(reader)?),
-        ImageFormat::Tiff => Box::new(TiffDecoder::new(reader)?),
-        ImageFormat::Tga => Box::new(TgaDecoder::new(reader)?),
-        ImageFormat::Bmp => Box::new(BmpDecoder::new(reader)?),
-        _ => return Err(anyhow!("{path:#?} has unsupported image format")),
-    };
-
-    match decoder.color_type() {
-        ColorType::Rgb8 | ColorType::Rgba8 => Ok(decoder),
-        _ => Err(anyhow!("{path:#?} has unsupported color type")),
-    }
-}
-
-pub type Decoder = Box<dyn ImageDecoder>;
-
 #[derive(Debug)]
 pub struct ImageInfo {
     pub path: Arc<Path>,
@@ -415,30 +356,98 @@ pub struct ImageInfo {
     pub rgba_size: usize,
 }
 
-#[derive(Debug, Parser, Deserialize)]
-pub struct Config {
-    pub working_buffer_size: usize,
-    pub group_size: u32,
-    pub sigma: f32,
-    pub output_dir: PathBuf,
+mod utils {
+    use anyhow::{anyhow, Result};
+    use image::{
+        codecs::{
+            bmp::BmpDecoder, jpeg::JpegDecoder, png::PngDecoder, tga::TgaDecoder,
+            tiff::TiffDecoder, webp::WebPDecoder,
+        },
+        ColorType, ImageDecoder, ImageFormat, Limits,
+    };
+    use std::{fs::File, io::BufReader, path::Path};
+
+    pub fn gaussian_kernel(sigma: f32) -> Vec<f32> {
+        let size = 6 * sigma as usize + 1;
+        let mut kernel = Vec::with_capacity(size);
+        let half_size = (size / 2) as isize;
+        let sigma2 = sigma * sigma;
+        let normalization_factor = 1.0 / (2.0 * std::f32::consts::PI * sigma2).sqrt();
+        let mut sum = 0.0;
+
+        for i in -half_size..=half_size {
+            let value = normalization_factor * (-((i * i) as f32) / (2.0 * sigma2)).exp();
+            kernel.push(value);
+            sum += value;
+        }
+
+        (0..size).for_each(|i| {
+            kernel[i] /= sum;
+        });
+
+        kernel
+    }
+
+    pub fn rgb_size_to_rgba_size(rbg_size: u64) -> Option<u64> {
+        rbg_size.checked_add(rbg_size / 3)
+    }
+
+    pub type Decoder = Box<dyn ImageDecoder>;
+
+    pub fn get_decoder(path: &Path) -> Result<Decoder> {
+        let format = ImageFormat::from_path(path)?;
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
+        let decoder: Decoder = match format {
+            ImageFormat::Png => Box::new(PngDecoder::with_limits(reader, Limits::default())?),
+            ImageFormat::Jpeg => Box::new(JpegDecoder::new(reader)?),
+            ImageFormat::WebP => Box::new(WebPDecoder::new(reader)?),
+            ImageFormat::Tiff => Box::new(TiffDecoder::new(reader)?),
+            ImageFormat::Tga => Box::new(TgaDecoder::new(reader)?),
+            ImageFormat::Bmp => Box::new(BmpDecoder::new(reader)?),
+            _ => return Err(anyhow!("{path:#?} has unsupported image format")),
+        };
+
+        match decoder.color_type() {
+            ColorType::Rgb8 | ColorType::Rgba8 => Ok(decoder),
+            _ => Err(anyhow!("{path:#?} has unsupported color type")),
+        }
+    }
 }
 
-impl Config {
-    const PREF: &str = "GBLUR";
+pub mod config {
+    use crate::Args;
+    use anyhow::Result;
+    use clap::Parser;
+    use config::Environment;
+    use serde::Deserialize;
+    use std::{env, path::PathBuf};
 
-    pub fn new(args: &Args) -> Result<Self> {
-        let mut conf = config::Config::builder();
-        if let Ok(path) = env::var(Self::PREF) {
-            conf = conf.add_source(config::File::with_name(&path));
+    #[derive(Debug, Parser, Deserialize)]
+    pub struct Config {
+        pub working_buffer_size: usize,
+        pub group_size: u32,
+        pub sigma: f32,
+        pub output_dir: PathBuf,
+    }
+
+    impl Config {
+        const PREF: &str = "GBLUR";
+
+        pub fn new(args: &Args) -> Result<Self> {
+            let mut conf = config::Config::builder();
+            if let Ok(path) = env::var(Self::PREF) {
+                conf = conf.add_source(config::File::with_name(&path));
+            }
+            let ret = conf
+                .add_source(Environment::with_prefix(Self::PREF))
+                .add_source(config::File::from_str(
+                    &toml::to_string(args)?,
+                    config::FileFormat::Toml,
+                ))
+                .build()?
+                .try_deserialize()?;
+            Ok(ret)
         }
-        let ret = conf
-            .add_source(Environment::with_prefix(Self::PREF))
-            .add_source(config::File::from_str(
-                &toml::to_string(args)?,
-                config::FileFormat::Toml,
-            ))
-            .build()?
-            .try_deserialize()?;
-        Ok(ret)
     }
 }
