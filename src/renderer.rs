@@ -328,7 +328,7 @@ impl Renderer {
 }
 
 #[derive(Debug)]
-pub enum LoadError {
+enum LoadError {
     TooLargeImage,
     NoSpaceLeft,
     DecoderError(anyhow::Error),
