@@ -242,6 +242,7 @@ impl Renderer {
                     ColorType::Rgb8 => self::rgb_size_to_rgba_size(decoder.total_bytes())
                         .ok_or(LoadError::TooLargeImage)?,
                     ColorType::Rgba8 => decoder.total_bytes(),
+                    // Currently only RGB8 and RGBA8 are supported
                     _ => unreachable!(),
                 };
                 let size: usize = size.try_into().map_err(|_| LoadError::TooLargeImage)?;
