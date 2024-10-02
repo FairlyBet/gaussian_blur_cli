@@ -1,30 +1,21 @@
-use std::{marker::PhantomData, ptr::NonNull};
-
-pub struct PersistentRead;
-pub struct PersistentWrite;
-pub struct Regular;
-
-pub struct ImageBuffer<T> {
-    buffer: u32,
-    texture: u32,
-    size: usize,
-    ptr: Option<NonNull<u8>>,
-    _marker: PhantomData<T>,
-}
-
-pub struct UniformBuffer<T> {
-    buffer: u32,
-    _marker: PhantomData<*const T>, // Neither Send nor Sync
-}
-
-mod impls {
-    use super::{ImageBuffer, PersistentRead, PersistentWrite, Regular, UniformBuffer};
+pub mod image_buffer {
     use std::{
         marker::PhantomData,
-        mem,
         ptr::{self, NonNull},
         slice,
     };
+
+    pub struct PersistentRead;
+    pub struct PersistentWrite;
+    pub struct Regular;
+
+    pub struct ImageBuffer<T> {
+        buffer: u32,
+        texture: u32,
+        size: usize,
+        ptr: Option<NonNull<u8>>,
+        _marker: PhantomData<T>,
+    }
 
     impl<T> ImageBuffer<T> {
         const TARGET: u32 = gl::TEXTURE_BUFFER;
@@ -175,6 +166,15 @@ mod impls {
                 gl::DeleteBuffers(1, &self.buffer);
             }
         }
+    }
+}
+
+pub mod unifrom_buffer {
+    use std::{marker::PhantomData, mem, ptr};
+
+    pub struct UniformBuffer<T> {
+        buffer: u32,
+        _marker: PhantomData<*const T>, // Neither Send nor Sync
     }
 
     impl<T> UniformBuffer<T> {

@@ -1,7 +1,7 @@
 use self::config::Config;
 use crate::{
     blur_program::{BlurProgram, ImageData},
-    buffers::{ImageBuffer, UniformBuffer},
+    buffers::{image_buffer::ImageBuffer, unifrom_buffer::UniformBuffer},
 };
 use anyhow::{anyhow, Result};
 use glfw::{
