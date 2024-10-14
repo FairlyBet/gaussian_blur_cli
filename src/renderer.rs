@@ -49,6 +49,14 @@ impl Renderer {
         // The subsequent code is safe as a providing pointer is created from
         // a valid reference to a local variable
         unsafe {
+            let mut major = 0;
+            let mut minor = 0;
+            gl::GetIntegerv(gl::MAJOR_VERSION, &mut major);
+            gl::GetIntegerv(gl::MINOR_VERSION, &mut minor);
+            if major < 4 || minor < 4 {
+                return None;
+            }
+
             gl::GetInteger64v(gl::MAX_TEXTURE_BUFFER_SIZE, &mut max_texture_buffer_size);
         }
         let max_buffer_size = (max_texture_buffer_size as usize).min(BlurProgram::MAX_BUFFER_SIZE);
